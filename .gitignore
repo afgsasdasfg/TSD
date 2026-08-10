@@ -1,0 +1,45 @@
+```
+# Android
+*.apk
+*.aar
+*.jar
+*.so
+*.dex
+
+# Build outputs
+build/
+app/build/
+.intermediates/
+.externalNativeBuild/
+.cxx/
+
+# Gradle
+.gradle/
+gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# Local configuration
+local.properties
+.project
+.classpath
+
+# Log files
+*.log
+
+# Compiled Python (if any)
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+
+# Dependencies
+node_modules/
+vendor/
+lib/
+```
