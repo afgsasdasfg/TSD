@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavType
@@ -17,72 +18,11 @@ import com.wb.fbs.tsd.data.model.*
 import com.wb.fbs.tsd.ui.screens.*
 import com.wb.fbs.tsd.ui.theme.*
 
-/**
- * Главное приложение — навигация между экранами пайплайна
- */
 class MainActivity : ComponentActivity() {
-    
-    // Демо-данные для тестирования (будут заменены на API)
-    private val demoOrders = listOf(
-        Order(
-            id = "ORD-001",
-            clientId = "CLT-001",
-            clientName = "ИП Иванов",
-            createdAt = System.currentTimeMillis(),
-            status = OrderStatus.NEW,
-            items = listOf(
-                OrderItem(
-                    id = "ITM-001",
-                    orderId = "ORD-001",
-                    article = "FB-12345",
-                    name = "Футболка белая",
-                    color = "Белый",
-                    size = "L",
-                    barcode = "1234567890123",
-                    quantity = 5,
-                    scannedQuantity = 0,
-                    requiresMarking = false
-                ),
-                OrderItem(
-                    id = "ITM-002",
-                    orderId = "ORD-001",
-                    article = "FB-12346",
-                    name = "Футболка чёрная",
-                    color = "Чёрный",
-                    size = "M",
-                    barcode = "1234567890124",
-                    quantity = 3,
-                    scannedQuantity = 0,
-                    requiresMarking = true
-                )
-            )
-        ),
-        Order(
-            id = "ORD-002",
-            clientId = "CLT-002",
-            clientName = "ООО Ромашка",
-            createdAt = System.currentTimeMillis() - 86400000,
-            status = OrderStatus.PICKING,
-            items = listOf(
-                OrderItem(
-                    id = "ITM-003",
-                    orderId = "ORD-002",
-                    article = "DR-98765",
-                    name = "Платье летнее",
-                    color = "Красный",
-                    size = "S",
-                    barcode = "9876543210123",
-                    quantity = 2,
-                    scannedQuantity = 1,
-                    requiresMarking = true
-                )
-            )
-        )
-    )
-    
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
@@ -101,114 +41,131 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = DarkBackground
                 ) {
-                    AppNavigation(orders = demoOrders)
+                    AppNavigator(createDemoOrders())
                 }
             }
         }
     }
 }
 
-/**
- * Навигация между экранами пайплайна
- */
+private fun createDemoOrders(): List<Order> = listOf(
+    Order(
+        id = "ORD-001", clientId = "CLT-001", clientName = "ИП Иванов",
+        createdAt = System.currentTimeMillis(), status = OrderStatus.NEW,
+        items = listOf(
+            OrderItem("ITM-001", "ORD-001", "FB-12345", "Футболка белая", "Белый", "L",
+                "1234567890123", 5, 0, requiresMarking = false),
+            OrderItem("ITM-002", "ORD-001", "FB-12346", "Футболка чёрная", "Чёрный", "M",
+                "1234567890124", 3, 0, requiresMarking = true)
+        )
+    ),
+    Order(
+        id = "ORD-002", clientId = "CLT-002", clientName = "ООО Ромашка",
+        createdAt = System.currentTimeMillis() - 86400000, status = OrderStatus.PICKING,
+        items = listOf(
+            OrderItem("ITM-003", "ORD-002", "DR-98765", "Платье летнее", "Красный", "S",
+                "9876543210123", 2, 1, requiresMarking = true)
+        )
+    )
+)
+
 @Composable
-fun AppNavigation(orders: List<Order>) {
+fun AppNavigator(initialOrders: List<Order>) {
     val navController = rememberNavController()
-    var currentOrder by remember { mutableStateOf<Order?>(null) }
-    
-    NavHost(
-        navController = navController,
-        startDestination = "orders"
-    ) {
-        // Экран 1: Список заказов
+
+    // === ОБЩИЙ MUTABLE STATE ===
+    var orderList by remember { mutableStateOf(initialOrders) }
+
+    fun findById(id: String) = orderList.find { it.id == id }
+
+    fun pickOne(orderId: String, itemId: String) {
+        orderList = orderList.map { o ->
+            if (o.id != orderId) return@map o
+            val items = o.items.map { i ->
+                if (i.id != itemId) return@map i
+                if (i.scannedQuantity >= i.quantity) return@map i
+                i.copy(scannedQuantity = i.scannedQuantity + 1)
+            }
+            o.copy(items = items)
+        }
+    }
+
+    fun scanBarcode(orderId: String) {
+        orderList = orderList.map { o ->
+            if (o.id != orderId) return@map o
+            var changed = false
+            val items = o.items.map { i ->
+                if (!changed && !i.isFullyScanned && i.scannedQuantity < i.quantity) {
+                    changed = true
+                    i.copy(scannedQuantity = i.scannedQuantity + 1)
+                } else i
+            }
+            o.copy(items = items)
+        }
+    }
+
+    fun scanKiz(orderId: String, itemId: String) {
+        orderList = orderList.map { o ->
+            if (o.id != orderId) return@map o
+            val items = o.items.map { i ->
+                if (i.id != itemId) return@map i
+                if (i.markedQuantity >= i.quantity) return@map i
+                i.copy(markedQuantity = i.markedQuantity + 1)
+            }
+            o.copy(items = items)
+        }
+    }
+
+    NavHost(navController, startDestination = "orders") {
         composable("orders") {
-            OrdersListScreen(
-                orders = orders,
-                onOrderClick = { order ->
-                    currentOrder = order
-                    navController.navigate("picking/${order.id}")
-                }
-            )
+            OrdersListScreen(orderList) { o ->
+                navController.navigate("picking/${o.id}")
+            }
         }
-        
-        // Экран 2: Сборка
-        composable(
-            route = "picking/{orderId}",
-            arguments = listOf(navArgument("orderId") { type = NavType.StringType })
-        ) { backStackEntry ->
-            val orderId = backStackEntry.arguments?.getString("orderId")
-            val order = orders.find { it.id == orderId } ?: return@composable
-            
-            PickingScreen(
-                order = order,
+
+        composable("picking/{orderId}", arguments = listOf(navArgument("orderId") { type = NavType.StringType })) { bse ->
+            val oid = bse.arguments?.getString("orderId") ?: return@composable
+            val o = findById(oid) ?: return@composable
+
+            PickingScreen(o,
                 onBackClick = { navController.popBackStack() },
-                onItemPicked = { item ->
-                    // TODO: Обновить статус в ViewModel
-                },
-                onNextClick = {
-                    navController.navigate("checking/${order.id}")
-                }
-            )
+                onItemPicked = { pickOne(oid, it.id) },
+                onNextClick = { navController.navigate("checking/$oid") })
         }
-        
-        // Экран 3: Проверка (сканирование)
-        composable(
-            route = "checking/{orderId}",
-            arguments = listOf(navArgument("orderId") { type = NavType.StringType })
-        ) { backStackEntry ->
-            val orderId = backStackEntry.arguments?.getString("orderId")
-            val order = orders.find { it.id == orderId } ?: return@composable
-            
-            CheckingScreen(
-                order = order,
+
+        composable("checking/{orderId}", arguments = listOf(navArgument("orderId") { type = NavType.StringType })) { bse ->
+            val oid = bse.arguments?.getString("orderId") ?: return@composable
+            val o = findById(oid) ?: return@composable
+
+            CheckingScreen(o,
                 onBackClick = { navController.popBackStack() },
-                onBarcodeScanned = { barcode ->
-                    // TODO: Обработать штрихкод через ViewModel
-                },
-                onNextClick = {
-                    navController.navigate("marking/${order.id}")
-                }
-            )
+                onBarcodeScanned = { _ -> scanBarcode(oid) },
+                onNextClick = { navController.navigate("marking/$oid") })
         }
-        
-        // Экран 4: Маркировка (КИЗ)
-        composable(
-            route = "marking/{orderId}",
-            arguments = listOf(navArgument("orderId") { type = NavType.StringType })
-        ) { backStackEntry ->
-            val orderId = backStackEntry.arguments?.getString("orderId")
-            val order = orders.find { it.id == orderId } ?: return@composable
-            
-            MarkingScreen(
-                order = order,
+
+        composable("marking/{orderId}", arguments = listOf(navArgument("orderId") { type = NavType.StringType })) { bse ->
+            val oid = bse.arguments?.getString("orderId") ?: return@composable
+            val o = findById(oid) ?: return@composable
+
+            MarkingScreen(o,
                 onBackClick = { navController.popBackStack() },
-                onKizScanned = { code, item ->
-                    // TODO: Обработать КИЗ через ViewModel
-                },
+                onKizScanned = { _, item -> scanKiz(oid, item.id) },
                 onCompleteClick = {
-                    navController.navigate("complete/${order.id}")
-                }
-            )
+                    orderList = orderList.map { if (it.id == oid) it.copy(status = OrderStatus.READY) else it }
+                    navController.navigate("complete/$oid")
+                })
         }
-        
-        // Экран 5: Готово
-        composable(
-            route = "complete/{orderId}",
-            arguments = listOf(navArgument("orderId") { type = NavType.StringType })
-        ) { backStackEntry ->
-            val orderId = backStackEntry.arguments?.getString("orderId")
-            val order = orders.find { it.id == orderId } ?: return@composable
-            
-            ShipmentCompleteScreen(
-                order = order,
+
+        composable("complete/{orderId}", arguments = listOf(navArgument("orderId") { type = NavType.StringType })) { bse ->
+            val oid = bse.arguments?.getString("orderId") ?: return@composable
+            val o = findById(oid) ?: return@composable
+
+            ShipmentCompleteScreen(o,
                 onNewOrderClick = {
-                    currentOrder = null
-                    navController.popBackStack(destinationId = R.id.orders, inclusive = false)
+                    orderList = orderList.map { if (it.id == oid) it.copy(status = OrderStatus.SHIPPED) else it }
+                    navController.navigate("orders") { popUpTo(0) }
                 },
-                onPrintLabelClick = {
-                    // TODO: Печать этикетки
-                }
-            )
+                onPrintLabelClick = {})
         }
     }
 }

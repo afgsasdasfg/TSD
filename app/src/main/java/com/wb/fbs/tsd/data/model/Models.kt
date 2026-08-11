@@ -6,7 +6,7 @@ package com.wb.fbs.tsd.data.model
 data class Client(
     val id: String,
     val name: String,
-    valINN: String? = null
+    val INN: String? = null
 )
 
 /**

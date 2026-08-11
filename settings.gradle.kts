@@ -12,6 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-
-rootProject.name = "WBFBS_TSD"
+rootProject.name = "TSD"
 include(":app")

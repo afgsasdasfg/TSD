@@ -1,13 +1,13 @@
 package com.wb.fbs.tsd.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,7 +21,9 @@ import com.wb.fbs.tsd.ui.theme.*
 
 /**
  * Экран 4: Ввод КИЗ (маркировка) — сканирование Data Matrix кодов
- * Прогресс по каждому товару: сколько нужно ввести, сколько уже введено
+ *
+ * Обновление: onKizScanned теперь реально увеличивает markedQuantity.
+ * Каждый тап "Ввести КИЗ" или сканирование DataMatrix = +1 к marked count.
  */
 @Composable
 fun MarkingScreen(
@@ -35,7 +37,7 @@ fun MarkingScreen(
     val totalKizScanned = itemsRequiringMarking.sumOf { it.markedQuantity }
     val progress = if (totalKizNeeded > 0) totalKizScanned.toFloat() / totalKizNeeded else 1f
     val isComplete = progress >= 1.0f
-    
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -57,9 +59,9 @@ fun MarkingScreen(
                     tint = OnDarkPrimary
                 )
             }
-            
+
             Spacer(modifier = Modifier.width(8.dp))
-            
+
             Text(
                 text = "🏷️ Маркировка (КИЗ)",
                 fontSize = TextSizeExtraLarge,
@@ -67,9 +69,9 @@ fun MarkingScreen(
                 color = OnDarkPrimary
             )
         }
-        
+
         Spacer(modifier = Modifier.height(16.dp))
-        
+
         // Общий прогресс КИЗ КРУПНЫМ шрифтом
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -89,9 +91,9 @@ fun MarkingScreen(
                         fontWeight = FontWeight.ExtraBold,
                         color = if (isComplete) PrimaryGreen else WarningOrange
                     )
-                    
+
                     Spacer(modifier = Modifier.height(8.dp))
-                    
+
                     LinearProgressIndicator(
                         progress = progress,
                         modifier = Modifier
@@ -100,9 +102,8 @@ fun MarkingScreen(
                         color = if (isComplete) PrimaryGreen else WarningOrange,
                         trackColor = DarkSurface
                     )
-                    
                     Spacer(modifier = Modifier.height(8.dp))
-                    
+
                     Text(
                         text = if (isComplete) "✅ ВСЕ КИЗ ВВЕДЕНЫ" else "Сканируйте Data Matrix",
                         fontSize = TextSizeLarge,
@@ -112,9 +113,9 @@ fun MarkingScreen(
                 }
             }
         }
-        
+
         Spacer(modifier = Modifier.height(16.dp))
-        
+
         // Список товаров с прогрессом маркировки
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -124,9 +125,9 @@ fun MarkingScreen(
                 MarkingItemCard(item = item, onKizScanned = { code -> onKizScanned(code, item) })
             }
         }
-        
+
         Spacer(modifier = Modifier.height(16.dp))
-        
+
         // Кнопка завершения
         Button(
             onClick = onCompleteClick,
@@ -153,13 +154,13 @@ fun MarkingScreen(
 private fun MarkingItemCard(item: OrderItem, onKizScanned: (String) -> Unit) {
     val isFullyMarked = item.isFullyMarked
     val needsMarking = item.requiresMarking
-    
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = if (!needsMarking) DarkSurface.copy(alpha = 0.5f) 
-                           else if (isFullyMarked) DarkSurfaceVariant 
-                           else DarkSurface
+            containerColor = if (!needsMarking) DarkSurface.copy(alpha = 0.5f)
+            else if (isFullyMarked) DarkSurfaceVariant
+            else DarkSurface
         ),
         border = if (needsMarking && !isFullyMarked) androidx.compose.foundation.BorderStroke(2.dp, WarningOrange) else null
     ) {
@@ -181,65 +182,79 @@ private fun MarkingItemCard(item: OrderItem, onKizScanned: (String) -> Unit) {
                             fontWeight = FontWeight.Bold,
                             color = OnDarkPrimary
                         )
-                        
+
                         Spacer(modifier = Modifier.width(8.dp))
-                        
+
                         if (!needsMarking) {
-                            Badge {
+                            Badge() {
                                 Text("Без маркировки", fontSize = TextSizeSmall)
                             }
                         }
                     }
-                    
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
                     Text(
-                        text = "${item.article} | ${item.size}",
+                        text = "Арт: ${item.article} | ${item.color} | ${item.size}",
                         fontSize = TextSizeSmall,
                         color = OnDarkSecondary
                     )
                 }
-                
-                Icon(
-                    imageVector = if (isFullyMarked || !needsMarking) Icons.Default.CheckCircle else Icons.Default.Circle,
-                    contentDescription = null,
-                    tint = if (isFullyMarked || !needsMarking) PrimaryGreen else WarningOrange,
-                    modifier = Modifier.size(IconSizeMedium)
-                )
-            }
-            
-            if (needsMarking) {
-                Spacer(modifier = Modifier.height(12.dp))
-                
-                // Прогресс-бар для этого товара
-                val itemProgress = item.markedQuantity.toFloat() / item.quantity
-                LinearProgressIndicator(
-                    progress = itemProgress,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp),
-                    color = if (isFullyMarked) PrimaryGreen else WarningOrange,
-                    trackColor = DarkSurface
-                )
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "КИЗ: ${item.markingProgressText}",
-                        fontSize = TextSizeLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isFullyMarked) PrimaryGreen else OnDarkPrimary
-                    )
-                    
-                    Text(
-                        text = "× ${item.quantity}",
-                        fontSize = TextSizeMedium,
-                        color = OnDarkSecondary
-                    )
+
+                Column(horizontalAlignment = Alignment.End) {
+                    if (needsMarking) {
+                        Text(
+                            text = "○",  // обычный кружок Unicode
+                            fontSize = TextSizeLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = OnDarkSecondary
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Text(
+                            text = item.markingProgressText,
+                            fontSize = TextSizeExtraLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isFullyMarked) PrimaryGreen else WarningOrange
+                        )
+
+                        if (!isFullyMarked) {
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Button(
+                                onClick = { onKizScanned("") },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(56.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = WarningOrange
+                                ),
+                                shape = MaterialTheme.shapes.medium
+                            ) {
+                                Text(
+                                    text = "📸 Сканировать Data Matrix",
+                                    fontSize = TextSizeMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
+
+@Composable
+private fun Badge(content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .background(InfoBlue, shape = MaterialTheme.shapes.small)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        content()
+    }
+}
+

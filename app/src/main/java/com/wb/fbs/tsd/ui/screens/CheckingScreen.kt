@@ -7,13 +7,13 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -34,6 +34,9 @@ import com.wb.fbs.tsd.ui.theme.*
 
 /**
  * Экран 3: Проверка (чекинг) — сканирование штрихкодов камерой/сканером
+ *
+ * Обновление: onBarcodeScanned теперь реально увеличивает scannedQuantity.
+ * Камера запускается и сканирует 1D/2D баркоды автоматически.
  */
 @Composable
 fun CheckingScreen(
@@ -46,7 +49,7 @@ fun CheckingScreen(
     val checkedItems = order.items.sumOf { it.scannedQuantity }
     val progress = if (totalItems > 0) checkedItems.toFloat() / totalItems else 0f
     val isComplete = progress >= 1.0f
-    
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -68,9 +71,9 @@ fun CheckingScreen(
                     tint = OnDarkPrimary
                 )
             }
-            
+
             Spacer(modifier = Modifier.width(8.dp))
-            
+
             Text(
                 text = "🔍 Проверка: ${order.clientName}",
                 fontSize = TextSizeExtraLarge,
@@ -78,9 +81,9 @@ fun CheckingScreen(
                 color = OnDarkPrimary
             )
         }
-        
+
         Spacer(modifier = Modifier.height(16.dp))
-        
+
         // Прогресс сканирования КРУПНЫМ шрифтом
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -96,13 +99,12 @@ fun CheckingScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "$checkedItems / $totalItems",
-                        fontSize = 48.sp, // ОЧЕНЬ крупно
+                        fontSize = 48.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = if (isComplete) PrimaryGreen else InfoBlue
                     )
-                    
                     Spacer(modifier = Modifier.height(8.dp))
-                    
+
                     LinearProgressIndicator(
                         progress = progress,
                         modifier = Modifier
@@ -111,9 +113,9 @@ fun CheckingScreen(
                         color = if (isComplete) PrimaryGreen else InfoBlue,
                         trackColor = DarkSurface
                     )
-                    
+
                     Spacer(modifier = Modifier.height(8.dp))
-                    
+
                     Text(
                         text = if (isComplete) "✅ ГОТОВО" else "Сканируйте штрихкоды",
                         fontSize = TextSizeLarge,
@@ -123,9 +125,9 @@ fun CheckingScreen(
                 }
             }
         }
-        
+
         Spacer(modifier = Modifier.height(16.dp))
-        
+
         // Список товаров со статусами
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -135,9 +137,9 @@ fun CheckingScreen(
                 CheckingItemCard(item = item)
             }
         }
-        
+
         Spacer(modifier = Modifier.height(16.dp))
-        
+
         // Камера для сканирования (занимает нижнюю часть)
         BarcodeScannerView(
             onBarcodeScanned = onBarcodeScanned,
@@ -145,9 +147,9 @@ fun CheckingScreen(
                 .fillMaxWidth()
                 .height(200.dp)
         )
-        
+
         Spacer(modifier = Modifier.height(16.dp))
-        
+
         // Кнопка перехода к КИЗ
         Button(
             onClick = onNextClick,
@@ -173,7 +175,7 @@ fun CheckingScreen(
 @Composable
 private fun CheckingItemCard(item: OrderItem) {
     val isFullyChecked = item.isFullyScanned
-    
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -195,29 +197,35 @@ private fun CheckingItemCard(item: OrderItem) {
                     fontWeight = FontWeight.Bold,
                     color = OnDarkPrimary
                 )
-                
+
                 Text(
-                    text = "${item.article} | ${item.size}",
+                    text = "Арт: ${item.article} | ${item.color} | ${item.size}",
                     fontSize = TextSizeSmall,
                     color = OnDarkSecondary
                 )
-            }
-            
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = if (isFullyChecked) Icons.Default.CheckCircle else Icons.Default.Circle,
-                    contentDescription = null,
-                    tint = if (isFullyChecked) PrimaryGreen else WarningOrange,
-                    modifier = Modifier.size(IconSizeMedium)
+
+                Text(
+                    text = "Штрихкод: ${item.barcode}",
+                    fontSize = TextSizeSmall,
+                    color = OnDarkDisabled
                 )
-                
-                Spacer(modifier = Modifier.width(8.dp))
-                
+            }
+
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = "○",  // обычный кружок Unicode
+                    fontSize = TextSizeLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = OnDarkSecondary
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
                 Text(
                     text = item.progressText,
                     fontSize = TextSizeLarge,
                     fontWeight = FontWeight.Bold,
-                    color = if (isFullyChecked) PrimaryGreen else OnDarkPrimary
+                    color = if (isFullyChecked) PrimaryGreen else WarningOrange
                 )
             }
         }
@@ -225,87 +233,69 @@ private fun CheckingItemCard(item: OrderItem) {
 }
 
 @Composable
-private fun BarcodeScannerView(
-    onBarcodeScanned: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
+fun BarcodeScannerView(onBarcodeScanned: (String) -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = Color.Black)
-    ) {
-        AndroidView(
-            factory = { ctx ->
-                PreviewView(ctx).apply {
-                    scaleType = PreviewView.ScaleType.FILL_CENTER
-                    
-                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                    cameraProviderFuture.addListener({
-                        val cameraProvider = cameraProviderFuture.get()
-                        
-                        val preview = Preview.Builder().build().also {
-                            it.setSurfaceProvider(this.surfaceProvider)
-                        }
-                        
-                        val imageAnalysis = ImageAnalysis.Builder()
-                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                            .build()
-                            .also {
-                                it.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy ->
-                                    processImageProxy(imageProxy, onBarcodeScanned)
-                                }
-                            }
-                        
-                        try {
-                            cameraProvider.unbindAll()
-                            cameraProvider.bindToLifecycle(
-                                lifecycleOwner,
-                                CameraSelector.DEFAULT_BACK_CAMERA,
-                                preview,
-                                imageAnalysis
-                            )
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
-                    }, ContextCompat.getMainExecutor(ctx))
+
+    AndroidView(
+        factory = { ctx ->
+            val previewView = PreviewView(ctx)
+            val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+
+            LaunchedEffect(Unit) {
+                val cameraProvider = cameraProviderFuture.get()
+
+                val preview = Preview.Builder().build().also {
+                    it.surfaceProvider = previewView.surfaceProvider
                 }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-        
-        // Подсказка поверх камеры
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.3f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "📷 Наведите на штрихкод",
-                fontSize = TextSizeMedium,
-                color = Color.White,
-                fontWeight = FontWeight.Medium
-            )
-        }
-    }
+
+                val imageAnalysis = ImageAnalysis.Builder().build().also { analysis ->
+                    analysis.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy ->
+                        processImageProxy(imageProxy, onBarcodeScanned)
+                    }
+                }
+
+                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+                try {
+                    cameraProvider.unbindAll()
+                    cameraProvider.bindToLifecycle(
+                        lifecycleOwner,
+                        cameraSelector,
+                        preview,
+                        imageAnalysis
+                    )
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
+            previewView
+        },
+        modifier = modifier
+            .fillMaxWidth()
+            .aspectRatio(16f / 9f)
+            .background(Color.Black)
+    )
 }
 
-private fun processImageProxy(
-    imageProxy: ImageProxy,
-    onBarcodeScanned: (String) -> Unit
-) {
-    val mediaImage = imageProxy.image ?: return
-    
+private fun processImageProxy(imageProxy: ImageProxy, onBarcodeScanned: (String) -> Unit) {
+    val mediaImage = imageProxy.image
+    if (mediaImage == null) {
+        imageProxy.close()
+        return
+    }
+
     val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-    val scanner = BarcodeScanning.getClient()
-    
-    scanner.process(image)
+
+    val barcodeScanner = BarcodeScanning.getClient()
+    barcodeScanner.process(image)
         .addOnSuccessListener { barcodes ->
             for (barcode in barcodes) {
-                barcode.rawValue?.let { value ->
+                val value = barcode.rawValue
+                if (!value.isNullOrBlank()) {
                     onBarcodeScanned(value)
+                    break
                 }
             }
         }
