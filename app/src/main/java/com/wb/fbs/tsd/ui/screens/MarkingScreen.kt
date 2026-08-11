@@ -1,5 +1,6 @@
 package com.wb.fbs.tsd.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -15,15 +16,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.wb.fbs.tsd.data.model.Order
 import com.wb.fbs.tsd.data.model.OrderItem
 import com.wb.fbs.tsd.ui.theme.*
-import androidx.compose.ui.unit.sp
+
 /**
  * Экран 4: Ввод КИЗ (маркировка) — сканирование Data Matrix кодов
- *
- * Обновление: onKizScanned теперь реально увеличивает markedQuantity.
- * Каждый тап "Ввести КИЗ" или сканирование DataMatrix = +1 к marked count.
  */
 @Composable
 fun MarkingScreen(
@@ -102,6 +101,7 @@ fun MarkingScreen(
                         color = if (isComplete) PrimaryGreen else WarningOrange,
                         trackColor = DarkSurface
                     )
+
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
@@ -152,6 +152,9 @@ fun MarkingScreen(
 
 @Composable
 private fun MarkingItemCard(item: OrderItem, onKizScanned: (String) -> Unit) {
+    var showDialog by remember { mutableStateOf(false) }
+    var kizCode by remember { mutableStateOf("") }
+
     val isFullyMarked = item.isFullyMarked
     val needsMarking = item.requiresMarking
 
@@ -162,7 +165,7 @@ private fun MarkingItemCard(item: OrderItem, onKizScanned: (String) -> Unit) {
             else if (isFullyMarked) DarkSurfaceVariant
             else DarkSurface
         ),
-        border = if (needsMarking && !isFullyMarked) androidx.compose.foundation.BorderStroke(2.dp, WarningOrange) else null
+        border = if (needsMarking && !isFullyMarked) BorderStroke(2.dp, WarningOrange) else null
     ) {
         Column(
             modifier = Modifier
@@ -186,7 +189,7 @@ private fun MarkingItemCard(item: OrderItem, onKizScanned: (String) -> Unit) {
                         Spacer(modifier = Modifier.width(8.dp))
 
                         if (!needsMarking) {
-                            androidx.compose.material3.Badge(containerColor = InfoBlue) {
+                            Badge(containerColor = InfoBlue) {
                                 Text("Без маркировки", fontSize = TextSizeSmall)
                             }
                         }
@@ -204,14 +207,13 @@ private fun MarkingItemCard(item: OrderItem, onKizScanned: (String) -> Unit) {
                 Column(horizontalAlignment = Alignment.End) {
                     if (needsMarking) {
                         Text(
-                            text = "○",  // обычный кружок Unicode
+                            text = "○",
                             fontSize = TextSizeLarge,
                             fontWeight = FontWeight.Bold,
                             color = OnDarkSecondary
                         )
 
                         Spacer(modifier = Modifier.height(4.dp))
-
                         Text(
                             text = item.markingProgressText,
                             fontSize = TextSizeExtraLarge,
@@ -223,7 +225,7 @@ private fun MarkingItemCard(item: OrderItem, onKizScanned: (String) -> Unit) {
                             Spacer(modifier = Modifier.height(8.dp))
 
                             Button(
-                                onClick = { onKizScanned("") },
+                                onClick = { showDialog = true },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(56.dp),
@@ -233,7 +235,7 @@ private fun MarkingItemCard(item: OrderItem, onKizScanned: (String) -> Unit) {
                                 shape = MaterialTheme.shapes.medium
                             ) {
                                 Text(
-                                    text = "📸 Сканировать Data Matrix",
+                                    text = "📋 Ввести код",
                                     fontSize = TextSizeMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
@@ -244,5 +246,61 @@ private fun MarkingItemCard(item: OrderItem, onKizScanned: (String) -> Unit) {
                 }
             }
         }
+    }
+
+    // Диалог ввода Data Matrix
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = {
+                Text(
+                    text = "Data Matrix",
+                    fontWeight = FontWeight.Bold,
+                    color = OnDarkPrimary
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Артикул: ${item.article} (${item.name})",
+                        fontSize = TextSizeSmall,
+                        color = OnDarkSecondary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = kizCode,
+                        onValueChange = { kizCode = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = {
+                            Text("4B00...", fontSize = TextSizeSmall, color = OnDarkDisabled)
+                        },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            unfocusedBorderColor = InfoBlue,
+                            focusedBorderColor = PrimaryGreen
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (kizCode.isNotBlank()) {
+                            onKizScanned(kizCode)
+                            kizCode = ""
+                            showDialog = false
+                        }
+                    },
+                    enabled = kizCode.isNotBlank()
+                ) {
+                    Text("✓ Отправить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDialog = false }) {
+                    Text("Отмена")
+                }
+            }
+        )
     }
 }
