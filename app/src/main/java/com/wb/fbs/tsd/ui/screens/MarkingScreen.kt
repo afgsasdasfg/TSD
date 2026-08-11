@@ -18,7 +18,7 @@ import androidx.compose.ui.unit.dp
 import com.wb.fbs.tsd.data.model.Order
 import com.wb.fbs.tsd.data.model.OrderItem
 import com.wb.fbs.tsd.ui.theme.*
-
+import androidx.compose.ui.unit.sp
 /**
  * Экран 4: Ввод КИЗ (маркировка) — сканирование Data Matrix кодов
  *
@@ -186,7 +186,7 @@ private fun MarkingItemCard(item: OrderItem, onKizScanned: (String) -> Unit) {
                         Spacer(modifier = Modifier.width(8.dp))
 
                         if (!needsMarking) {
-                            Badge() {
+                            androidx.compose.material3.Badge(containerColor = InfoBlue) {
                                 Text("Без маркировки", fontSize = TextSizeSmall)
                             }
                         }
@@ -246,15 +246,3 @@ private fun MarkingItemCard(item: OrderItem, onKizScanned: (String) -> Unit) {
         }
     }
 }
-
-@Composable
-private fun Badge(content: @Composable () -> Unit) {
-    Box(
-        modifier = Modifier
-            .background(InfoBlue, shape = MaterialTheme.shapes.small)
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-    ) {
-        content()
-    }
-}
-

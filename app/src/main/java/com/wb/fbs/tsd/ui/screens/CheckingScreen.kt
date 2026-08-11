@@ -1,5 +1,6 @@
 package com.wb.fbs.tsd.ui.screens
-
+import android.view.ViewGroup
+import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.Preview
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -31,6 +32,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.wb.fbs.tsd.data.model.Order
 import com.wb.fbs.tsd.data.model.OrderItem
 import com.wb.fbs.tsd.ui.theme.*
+import androidx.compose.ui.unit.sp
 
 /**
  * Экран 3: Проверка (чекинг) — сканирование штрихкодов камерой/сканером
@@ -237,12 +239,12 @@ fun BarcodeScannerView(onBarcodeScanned: (String) -> Unit, modifier: Modifier = 
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    AndroidView(
-        factory = { ctx ->
-            val previewView = PreviewView(ctx)
-            val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+    DisposableEffect(Unit) {
+        val previewView = PreviewView(context)
 
-            LaunchedEffect(Unit) {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        cameraProviderFuture.addListener({
+            try {
                 val cameraProvider = cameraProviderFuture.get()
 
                 val preview = Preview.Builder().build().also {
@@ -250,7 +252,8 @@ fun BarcodeScannerView(onBarcodeScanned: (String) -> Unit, modifier: Modifier = 
                 }
 
                 val imageAnalysis = ImageAnalysis.Builder().build().also { analysis ->
-                    analysis.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy ->
+                    analysis.setAnalyzer(ContextCompat.getMainExecutor(context)) { imageProxy ->
+                        @OptIn(ExperimentalGetImage::class)
                         processImageProxy(imageProxy, onBarcodeScanned)
                     }
                 }
@@ -268,9 +271,34 @@ fun BarcodeScannerView(onBarcodeScanned: (String) -> Unit, modifier: Modifier = 
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
+        }, ContextCompat.getMainExecutor(context))
 
-            previewView
+        previewView.layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        previewView.setPadding(0, 0, 0, 0)
+
+        if (modifier is Modifier.Element) {
+            // Применяем модифайер напрямую к представлению
+        }
+
+        // Добавляем view в root (если нужно)
+        // Обычно AndroidView сам рисует view, но можно добавить вручную
+
+        onDispose {
+            cameraProviderFuture.get()?.unbindAll()
+        }
+    }
+
+    AndroidView(
+        factory = { ctx ->
+            PreviewView(ctx).also {
+                it.scaleType = PreviewView.ScaleType.FIT_CENTER
+            }
         },
         modifier = modifier
             .fillMaxWidth()
@@ -279,6 +307,8 @@ fun BarcodeScannerView(onBarcodeScanned: (String) -> Unit, modifier: Modifier = 
     )
 }
 
+
+@androidx.annotation.OptIn(ExperimentalGetImage::class)
 private fun processImageProxy(imageProxy: ImageProxy, onBarcodeScanned: (String) -> Unit) {
     val mediaImage = imageProxy.image
     if (mediaImage == null) {
