@@ -72,3 +72,4 @@ data class KizCode(
     val scannedAt: Long,        // Время сканирования
     val isValid: Boolean = true // Валидность кода
 )
+data class ReturnReason(val reason: String, val timestamp: Long = System.currentTimeMillis())

@@ -25,33 +25,28 @@ import com.wb.fbs.tsd.ui.theme.*
 @Composable
 fun OrdersListScreen(
     orders: List<Order>,
-    onOrderClick: (Order) -> Unit
+    onOrderClick: (Order) -> Unit,
+    onReceivingClick: () -> Unit  // ← добавь этот параметр
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DarkBackground)
-            .padding(16.dp)
-    ) {
-        Text(
-            text = "📋 Заказы",
-            fontSize = TextSizeExtraLarge,
-            fontWeight = FontWeight.Bold,
-            color = OnDarkPrimary
-        )
-        
+    Column(modifier = Modifier.fillMaxSize().background(DarkBackground).padding(16.dp)) {
+        // Один заголовок с кнопкой приёмки
+        Row(modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("📋 Заказы", fontSize = TextSizeExtraLarge, fontWeight = FontWeight.Bold, color = OnDarkPrimary)
+            TextButton(onClick = onReceivingClick) {
+                Text("➕ Приёмка", fontSize = TextSizeLarge, color = InfoBlue, fontWeight = FontWeight.Bold)
+            }
+        }
         Spacer(modifier = Modifier.height(16.dp))
-        
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.weight(1f)
-        ) {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.weight(1f)) {
             items(orders, key = { it.id }) { order ->
                 OrderCard(order = order, onClick = { onOrderClick(order) })
             }
         }
     }
 }
+
 
 @Composable
 private fun OrderCard(order: Order, onClick: () -> Unit) {
