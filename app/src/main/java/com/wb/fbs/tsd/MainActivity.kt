@@ -3,21 +3,29 @@ package com.wb.fbs.tsd
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.wb.fbs.tsd.data.model.Product
 import com.wb.fbs.tsd.data.model.*
+import com.wb.fbs.tsd.data.network.WBApiClient
 import com.wb.fbs.tsd.ui.screens.*
 import com.wb.fbs.tsd.ui.theme.*
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -25,21 +33,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
-                    primary = PrimaryGreen,
-                    secondary = InfoBlue,
-                    tertiary = WarningOrange,
-                    background = DarkBackground,
-                    surface = DarkSurface,
-                    onPrimary = OnDarkPrimary,
-                    onSecondary = OnDarkPrimary,
-                    onBackground = OnDarkPrimary,
-                    onSurface = OnDarkPrimary
+                    primary = PrimaryGreen, secondary = InfoBlue, tertiary = WarningOrange,
+                    background = DarkBackground, surface = DarkSurface,
+                    onPrimary = OnDarkPrimary, onSecondary = OnDarkPrimary,
+                    onBackground = OnDarkPrimary, onSurface = OnDarkPrimary
                 )
             ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = DarkBackground
-                ) {
+                Surface(modifier = Modifier.fillMaxSize(), color = DarkBackground) {
                     AppNavigator(createDemoOrders())
                 }
             }
@@ -48,21 +48,16 @@ class MainActivity : ComponentActivity() {
 }
 
 private fun createDemoOrders(): List<Order> = listOf(
-    Order(
-        id = "ORD-001", clientId = "CLT-001", clientName = "ИП Иванов",
+    Order(id = "ORD-001", clientId = "CLT-001", clientName = "ИП Иванов",
         createdAt = System.currentTimeMillis(), status = OrderStatus.NEW,
         items = listOf(
             OrderItem("ITM-001", "ORD-001", "FB-12345", "Футболка белая", "Белый", "L", "1234567890123", 5, 0, false),
             OrderItem("ITM-002", "ORD-001", "FB-12346", "Футболка чёрная", "Чёрный", "M", "1234567890124", 3, 0, true)
-        )
-    ),
-    Order(
-        id = "ORD-002", clientId = "CLT-002", clientName = "ООО Ромашка",
+        ), wbOrderId = "WB-12345"),
+    Order(id = "ORD-002", clientId = "CLT-002", clientName = "ООО Ромашка",
         createdAt = System.currentTimeMillis() - 86400000, status = OrderStatus.NEW,
-        items = listOf(
-            OrderItem("ITM-003", "ORD-002", "DR-98765", "Платье летнее", "Красный", "S", "9876543210123", 2, 0, true)
-        )
-    )
+        items = listOf(OrderItem("ITM-003", "ORD-002", "DR-98765", "Платье летнее", "Красный", "S", "9876543210123", 2, 0, true)),
+        wbOrderId = "WB-67890")
 )
 
 fun validateKizFormat(code: String): Boolean = code.isNotBlank() && code.length >= 10
@@ -121,69 +116,128 @@ fun processShippedOrder(list: List<Order>, oid: String): List<Order>? {
     return list.mapIndexed { i, ord -> if (i == idx) ord.copy(status = OrderStatus.SHIPPED) else ord }
 }
 
+private fun convertWBOrder(wbDto: WBOrderDto, existingOrders: List<Order>): Order {
+    val existingOrder = existingOrders.find { it.wbOrderId == wbDto.orderNumber }
+    val items = wbDto.items?.map { item ->
+        val localItem = existingOrder?.items?.find { it.article == item.nmSku.toString() && it.size == (item.size ?: "") }
+        OrderItem(
+            id = localItem?.id ?: "wb-${item.nmSku}-${wbDto.orderNumber}",
+            orderId = existingOrder?.id ?: "", article = item.nmSku.toString(), name = item.name,
+            color = item.color ?: "Не указан", size = item.size ?: "Универсальный",
+            barcode = item.barcode ?: "", quantity = item.quantity,
+            scannedQuantity = localItem?.scannedQuantity ?: 0,
+            requiresMarking = item.isKiz == true || !wbDto.dtmCode.isNullOrBlank(),
+            markedQuantity = localItem?.markedQuantity ?: 0, isGrouped = localItem?.isGrouped ?: false
+        )
+    } ?: emptyList()
+    val createdAt = try {
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).parse(wbDto.createdAt ?: "")?.time ?: System.currentTimeMillis()
+    } catch (_: Exception) { System.currentTimeMillis() }
+    return Order(
+        id = existingOrder?.id ?: "wb-${wbDto.orderNumber}", clientId = wbDto.chc?.toString() ?: "UNKNOWN",
+        clientName = wbDto.customerName ?: wbDto.purchaserName ?: "Клиент #${wbDto.chc ?: "?"}",
+        createdAt = createdAt, status = mapWbStatusToModel(wbDto.status), items = items, wbOrderId = wbDto.orderNumber
+    )
+}
+
+private fun mapWbStatusToModel(s: String): OrderStatus = when (s.lowercase()) {
+    "new", "undefined" -> OrderStatus.NEW
+    "accepted", "collecting" -> OrderStatus.ACCEPTED
+    "in_work", "picking" -> OrderStatus.PICKING
+    "checking", "delivering" -> OrderStatus.CHECKING
+    "marking" -> OrderStatus.MARKING
+    "ready", "success" -> OrderStatus.READY
+    "shipped", "delivered" -> OrderStatus.SHIPPED
+    else -> OrderStatus.NEW
+}
+
 @Composable
 fun AppNavigator(initialOrders: List<Order>) {
     val navController = rememberNavController()
     var orderList by remember { mutableStateOf(initialOrders.toList()) }
     var products by remember { mutableStateOf<List<Product>>(emptyList()) }
+    var authToken by remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
+    var showAuthDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     fun findById(id: String) = orderList.find { it.id == id }
 
+    fun loadOrdersFromAPI() {
+        scope.launch {
+            isLoading = true
+            if (authToken.isNullOrEmpty()) { showAuthDialog = true; isLoading = false; return@launch }
+            try {
+                val result = WBApiClient.loadOrders(warehouseId = 1)
+                result.onSuccess { wbOrders ->
+                    val newOrders = wbOrders.map { dto -> convertWBOrder(dto, orderList) }
+                    val mergedOrders = mutableListOf<Order>()
+                    val updatedIds = mutableSetOf<String>()
+                    for (lo in orderList) {
+                        val wbMatch = newOrders.find { it.wbOrderId == lo.wbOrderId }
+                        if (wbMatch != null) { mergedOrders.add(wbMatch.copy(id = lo.id)); updatedIds.add(lo.id) }
+                        else mergedOrders.add(lo)
+                    }
+                    for (no in newOrders) if (!updatedIds.contains(no.id)) mergedOrders.add(no)
+                    orderList = mergedOrders
+                    isLoading = false
+                }.onFailure { _ -> isLoading = false }
+            } catch (_: Exception) { isLoading = false }
+        }
+    }
+
     NavHost(navController, startDestination = "home") {
-        composable("home") {
-            HomeScreen(onNavigate = { route -> navController.navigate(route) })
-        }
-
+        composable("home") { HomeScreen(onNavigate = { navController.navigate(it) }) }
         composable("receiving") {
-            ReceivingScreen(products = products,
-                onBackClick = { navController.popBackStack() },
-                onProductAdded = { p -> products += p },
-                onDeleteProduct = { pid -> products = products.filter { it.id != pid } },
-                onAddKizToProduct = { pid, kc ->
-                    products = products.map { p -> if (p.id == pid) p.copy(kizCodes = p.kizCodes + kc) else p }
-                })
+            ReceivingScreen(products = products, onBackClick = { navController.popBackStack() },
+                onProductAdded = { p -> products += p }, onDeleteProduct = { pid -> products = products.filter { it.id != pid } },
+                onAddKizToProduct = { pid, kc -> products = products.map { p -> if (p.id == pid) p.copy(kizCodes = p.kizCodes + kc) else p } })
         }
-
         composable("orders") {
             OrdersListScreen(orderList,
-                onOrderClick = { o -> navController.navigate("picking/${o.id}") },
+                onLoadOrdersClick = { loadOrdersFromAPI() },
+                onOrderClick = { navController.navigate("picking/${it.id}") },
                 onReceivingClick = { navController.navigate("receiving") })
         }
-
-        composable("picking/{orderId}", arguments = listOf(navArgument("orderId") { type = NavType.StringType })) { backStackEntry ->
-            val oid = backStackEntry.arguments?.getString("orderId") ?: return@composable
-            val o = findById(oid) ?: return@composable
-            PickingScreen(o, onBackClick = { navController.popBackStack() },
+        composable("picking/{orderId}", arguments = listOf(navArgument("orderId") { type = NavType.StringType })) { bse ->
+            val oid = bse.arguments?.getString("orderId") ?: return@composable
+            PickingScreen(findById(oid)!!, onBackClick = { navController.popBackStack() },
                 onItemPicked = { val u = processPickOne(orderList, oid, it.id); if (u != null) orderList = u },
                 onNextClick = { navController.navigate("checking/$oid") })
         }
-
-        composable("checking/{orderId}", arguments = listOf(navArgument("orderId") { type = NavType.StringType })) { backStackEntry ->
-            val oid = backStackEntry.arguments?.getString("orderId") ?: return@composable
-            CheckingScreen(findById(oid) ?: return@composable,
+        composable("checking/{orderId}", arguments = listOf(navArgument("orderId") { type = NavType.StringType })) { bse ->
+            CheckingScreen(findById(bse.arguments?.getString("orderId")!!)!!,
                 onBackClick = { navController.popBackStack() },
-                onBarcodeScanned = { val u = processScanBarcode(orderList, oid); if (u != null) orderList = u },
-                onNextClick = { navController.navigate("marking/$oid") })
+                onBarcodeScanned = { val u = processScanBarcode(orderList, bse.arguments!!.getString("orderId")!!); if (u != null) orderList = u },
+                onNextClick = { navController.navigate("marking/${bse.arguments!!.getString("orderId")!!}") })
         }
-        composable("marking/{orderId}", arguments = listOf(navArgument("orderId") { type = NavType.StringType })) { backStackEntry ->
-            val oid = backStackEntry.arguments?.getString("orderId") ?: return@composable
-            MarkingScreen(findById(oid) ?: return@composable,
-                onBackClick = { navController.popBackStack() },
+        composable("marking/{orderId}", arguments = listOf(navArgument("orderId") { type = NavType.StringType })) { bse ->
+            val oid = bse.arguments?.getString("orderId") ?: return@composable
+            MarkingScreen(findById(oid)!!, onBackClick = { navController.popBackStack() },
                 onKizScanned = { code, item ->
                     val (nL, msg) = processScanKiz(orderList, oid, item.id, code)
                     println(if (nL != null) "✓ $msg" else "✗ $msg"); if (nL != null) orderList = nL
-                },
-                onCompleteClick = {
-                    val u = processReadyOrder(orderList, oid); if (u != null) orderList = u
-                    navController.navigate("complete/$oid")
-                })
+                }, onCompleteClick = { val u = processReadyOrder(orderList, oid); if (u != null) orderList = u; navController.navigate("complete/$oid") })
         }
-
-        composable("complete/{orderId}", arguments = listOf(navArgument("orderId") { type = NavType.StringType })) { backStackEntry ->
-            val oid = backStackEntry.arguments?.getString("orderId") ?: return@composable
-            ShipmentCompleteScreen(findById(oid) ?: return@composable,
-                onNewOrderClick = { processShippedOrder(orderList, oid)?.let { ol -> orderList = ol }; navController.navigate("orders") { popUpTo(0) } },
+        composable("complete/{orderId}", arguments = listOf(navArgument("orderId") { type = NavType.StringType })) { bse ->
+            ShipmentCompleteScreen(findById(bse.arguments?.getString("orderId")!!)!!,
+                onNewOrderClick = { processShippedOrder(orderList, bse.arguments!!.getString("orderId")!!)?.let { ol -> orderList = ol }; navController.navigate("orders") { popUpTo(0) } },
                 onPrintLabelClick = {})
         }
     }
+
+    if (showAuthDialog) AuthDialog({ t -> authToken = t; WBApiClient.init(t); showAuthDialog = false; loadOrdersFromAPI() }, { showAuthDialog = false })
+    if (isLoading) Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = OnDarkPrimary) }
+}
+
+@Composable
+fun AuthDialog(onTokenReceived: (String) -> Unit, onCancel: () -> Unit) {
+    var tokenInput by remember { mutableStateOf("") }
+    AlertDialog(onDismissRequest = {}, title = { Text("Авторизация WB API") }, text = {
+        Column {
+            Text("Вставьте Bearer токен:")
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(value = tokenInput, onValueChange = { tokenInput = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+        }
+    }, confirmButton = { Button(onClick = { if (tokenInput.isNotBlank()) onTokenReceived(tokenInput) }, enabled = tokenInput.isNotBlank()) { Text("Подключить") } }, dismissButton = { TextButton(onClick = onCancel) { Text("Отмена") } })
 }

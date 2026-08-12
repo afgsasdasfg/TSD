@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,35 +20,52 @@ import com.wb.fbs.tsd.data.model.Order
 import com.wb.fbs.tsd.data.model.OrderStatus
 import com.wb.fbs.tsd.ui.theme.*
 
-/**
- * Экран 1: Список заказов
- * Группировка: Клиент → Заказы
- */
 @Composable
 fun OrdersListScreen(
     orders: List<Order>,
+    onLoadOrdersClick: () -> Unit,
     onOrderClick: (Order) -> Unit,
-    onReceivingClick: () -> Unit  // ← добавь этот параметр
+    onReceivingClick: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize().background(DarkBackground).padding(16.dp)) {
-        // Один заголовок с кнопкой приёмки
-        Row(modifier = Modifier.fillMaxWidth(),
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DarkBackground)
+            .padding(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically) {
-            Text("📋 Заказы", fontSize = TextSizeExtraLarge, fontWeight = FontWeight.Bold, color = OnDarkPrimary)
-            TextButton(onClick = onReceivingClick) {
-                Text("➕ Приёмка", fontSize = TextSizeLarge, color = InfoBlue, fontWeight = FontWeight.Bold)
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "📋 Заказы",
+                fontSize = TextSizeExtraLarge,
+                fontWeight = FontWeight.Bold,
+                color = OnDarkPrimary
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                IconButton(onClick = onLoadOrdersClick) {
+                    Icon(Icons.Default.CloudDownload, "Обновить из API", tint = InfoBlue)
+                }
+                IconButton(onClick = onReceivingClick) {
+                    Icon(Icons.Default.ReceiptLong, "Приёмка", tint = PrimaryGreen)
+                }
             }
         }
+
         Spacer(modifier = Modifier.height(16.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.weight(1f)) {
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.weight(1f)
+        ) {
             items(orders, key = { it.id }) { order ->
                 OrderCard(order = order, onClick = { onOrderClick(order) })
             }
         }
     }
 }
-
 
 @Composable
 private fun OrderCard(order: Order, onClick: () -> Unit) {
@@ -55,7 +74,7 @@ private fun OrderCard(order: Order, onClick: () -> Unit) {
         OrderStatus.CHECKING, OrderStatus.MARKING -> WarningOrange
         OrderStatus.NEW, OrderStatus.ACCEPTED, OrderStatus.PICKING -> InfoBlue
     }
-    
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -63,9 +82,7 @@ private fun OrderCard(order: Order, onClick: () -> Unit) {
         colors = CardDefaults.cardColors(containerColor = DarkSurface),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -77,7 +94,6 @@ private fun OrderCard(order: Order, onClick: () -> Unit) {
                     fontWeight = FontWeight.Bold,
                     color = OnDarkPrimary
                 )
-                
                 Box(
                     modifier = Modifier
                         .background(statusColor, shape = MaterialTheme.shapes.small)
@@ -91,22 +107,14 @@ private fun OrderCard(order: Order, onClick: () -> Unit) {
                     )
                 }
             }
-            
             Spacer(modifier = Modifier.height(8.dp))
-            
             Text(
                 text = "Заказов: ${order.items.size} | Товаров: ${order.items.sumOf { it.quantity }}",
                 fontSize = TextSizeMedium,
                 color = OnDarkSecondary
             )
-            
             Spacer(modifier = Modifier.height(8.dp))
-            
-            Text(
-                text = "ID: ${order.id}",
-                fontSize = TextSizeSmall,
-                color = OnDarkDisabled
-            )
+            Text(text = "ID: ${order.id}", fontSize = TextSizeSmall, color = OnDarkDisabled)
         }
     }
 }
