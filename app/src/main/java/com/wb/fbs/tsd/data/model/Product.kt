@@ -11,4 +11,7 @@ data class Product(
     val quantityInStock: Int = 0,
     val kizCodes: List<String> = emptyList(),
     val receivedAt: Long = System.currentTimeMillis()
-)
+) {
+    val isFullyMarked: Boolean
+        get() = !requiresMarking || kizCodes.isNotEmpty()
+}

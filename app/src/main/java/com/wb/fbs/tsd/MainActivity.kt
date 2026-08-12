@@ -69,8 +69,7 @@ fun validateKizFormat(code: String): Boolean = code.isNotBlank() && code.length 
 
 fun processPickOne(list: List<Order>, oid: String, itemId: String): List<Order>? {
     val idx = list.indexOfFirst { it.id == oid } ?: return null
-    val o = list[idx]
-    val newItems = o.items.map { i ->
+    val newItems = list[idx].items.map { i ->
         if (i.id == itemId && !i.isFullyScanned) i.copy(scannedQuantity = i.scannedQuantity + 1) else i
     }
     return list.mapIndexed { i, ord -> if (i == idx) ord.copy(items = newItems) else ord }
@@ -130,63 +129,60 @@ fun AppNavigator(initialOrders: List<Order>) {
 
     fun findById(id: String) = orderList.find { it.id == id }
 
-    NavHost(navController, startDestination = "receiving") {
+    NavHost(navController, startDestination = "home") {
+        composable("home") {
+            HomeScreen(onNavigate = { route -> navController.navigate(route) })
+        }
+
         composable("receiving") {
             ReceivingScreen(products = products,
-                onBackClick = { navController.navigate("orders") },
-                onProductAdded = { p -> products += p })
+                onBackClick = { navController.popBackStack() },
+                onProductAdded = { p -> products += p },
+                onDeleteProduct = { pid -> products = products.filter { it.id != pid } },
+                onAddKizToProduct = { pid, kc ->
+                    products = products.map { p -> if (p.id == pid) p.copy(kizCodes = p.kizCodes + kc) else p }
+                })
         }
+
         composable("orders") {
             OrdersListScreen(orderList,
                 onOrderClick = { o -> navController.navigate("picking/${o.id}") },
                 onReceivingClick = { navController.navigate("receiving") })
         }
+
         composable("picking/{orderId}", arguments = listOf(navArgument("orderId") { type = NavType.StringType })) { backStackEntry ->
             val oid = backStackEntry.arguments?.getString("orderId") ?: return@composable
             val o = findById(oid) ?: return@composable
-            PickingScreen(o,
-                onBackClick = { navController.popBackStack() },
-                onItemPicked = {
-                    val u = processPickOne(orderList, oid, it.id)
-                    if (u != null) orderList = u
-                },
+            PickingScreen(o, onBackClick = { navController.popBackStack() },
+                onItemPicked = { val u = processPickOne(orderList, oid, it.id); if (u != null) orderList = u },
                 onNextClick = { navController.navigate("checking/$oid") })
         }
+
         composable("checking/{orderId}", arguments = listOf(navArgument("orderId") { type = NavType.StringType })) { backStackEntry ->
             val oid = backStackEntry.arguments?.getString("orderId") ?: return@composable
-            val o = findById(oid) ?: return@composable
-            CheckingScreen(o,
+            CheckingScreen(findById(oid) ?: return@composable,
                 onBackClick = { navController.popBackStack() },
-                onBarcodeScanned = {
-                    val u = processScanBarcode(orderList, oid)
-                    if (u != null) orderList = u
-                },
+                onBarcodeScanned = { val u = processScanBarcode(orderList, oid); if (u != null) orderList = u },
                 onNextClick = { navController.navigate("marking/$oid") })
         }
         composable("marking/{orderId}", arguments = listOf(navArgument("orderId") { type = NavType.StringType })) { backStackEntry ->
             val oid = backStackEntry.arguments?.getString("orderId") ?: return@composable
-            val o = findById(oid) ?: return@composable
-            MarkingScreen(o,
+            MarkingScreen(findById(oid) ?: return@composable,
                 onBackClick = { navController.popBackStack() },
                 onKizScanned = { code, item ->
                     val (nL, msg) = processScanKiz(orderList, oid, item.id, code)
-                    println(if (nL != null) "✓ $msg" else "✗ $msg")
-                    if (nL != null) orderList = nL
+                    println(if (nL != null) "✓ $msg" else "✗ $msg"); if (nL != null) orderList = nL
                 },
                 onCompleteClick = {
-                    val u = processReadyOrder(orderList, oid)
-                    if (u != null) orderList = u
+                    val u = processReadyOrder(orderList, oid); if (u != null) orderList = u
                     navController.navigate("complete/$oid")
                 })
         }
+
         composable("complete/{orderId}", arguments = listOf(navArgument("orderId") { type = NavType.StringType })) { backStackEntry ->
             val oid = backStackEntry.arguments?.getString("orderId") ?: return@composable
-            val o = findById(oid) ?: return@composable
-            ShipmentCompleteScreen(o,
-                onNewOrderClick = {
-                    processShippedOrder(orderList, oid)?.let { orderList = it }
-                    navController.navigate("orders") { popUpTo(0) }
-                },
+            ShipmentCompleteScreen(findById(oid) ?: return@composable,
+                onNewOrderClick = { processShippedOrder(orderList, oid)?.let { ol -> orderList = ol }; navController.navigate("orders") { popUpTo(0) } },
                 onPrintLabelClick = {})
         }
     }
