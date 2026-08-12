@@ -13,7 +13,7 @@ object WBApiClient {
     private var authToken: String? = null
     private var clientId: Int = 0
 
-    fun init(apiKey: String?, wbClientId: Int) {
+    fun init(context: android.content.Context, apiKey: String?, wbClientId: Int) {
         if (!this::apiService.isInitialized) {
             apiService = Retrofit.Builder()
                 .baseUrl(baseUrl)
@@ -21,8 +21,15 @@ object WBApiClient {
                 .build()
                 .create(WBApiService::class.java)
         }
-        clientId = wbClientId
-        // Токен получим при первом вызове authorize()
+
+        // Сохраняем clientId только если передан ненулевой
+        if (wbClientId != 0) {
+            clientId = wbClientId
+            val sp = context.getSharedPreferences("wb_prefs", android.content.Context.MODE_PRIVATE)
+            sp.edit().putInt("client_id", clientId).apply()
+        }
+
+        authToken = apiKey
     }
 
     suspend fun authenticate(apiKey: String): Result<WBAuthorizeResponse> = try {

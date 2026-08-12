@@ -4,15 +4,13 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -80,7 +78,6 @@ fun processScanBarcode(list: List<Order>, oid: String): List<Order>? {
     }
     return if (found) list.mapIndexed { i, ord -> if (i == idx) ord.copy(items = newItems) else ord } else null
 }
-
 fun processScanKiz(list: List<Order>, oid: String, itemId: String, kizCode: String): Pair<List<Order>?, String?> {
     if (!validateKizFormat(kizCode)) return null to "Неверный формат"
     val idx = list.indexOfFirst { it.id == oid }
@@ -153,6 +150,7 @@ private fun mapWbStatusToModel(s: String): OrderStatus = when (s.lowercase()) {
 
 @Composable
 fun AppNavigator(initialOrders: List<Order>) {
+    val context = LocalContext.current
     val navController = rememberNavController()
     var orderList by remember { mutableStateOf(initialOrders.toList()) }
     var products by remember { mutableStateOf<List<Product>>(emptyList()) }
@@ -160,6 +158,9 @@ fun AppNavigator(initialOrders: List<Order>) {
     var isLoading by remember { mutableStateOf(false) }
     var showAuthDialog by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    val prefs = remember { context.getSharedPreferences("wb_prefs", android.content.Context.MODE_PRIVATE) }
+    val hasStoredCredentials = remember(prefs) { prefs.getString("api_token", null) != null }
 
     fun findById(id: String) = orderList.find { it.id == id }
 
@@ -226,18 +227,85 @@ fun AppNavigator(initialOrders: List<Order>) {
         }
     }
 
-    if (showAuthDialog) AuthDialog({ t -> authToken = t; WBApiClient.init(t); showAuthDialog = false; loadOrdersFromAPI() }, { showAuthDialog = false })
-    if (isLoading) Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = OnDarkPrimary) }
+    if (!hasStoredCredentials) {
+        AuthDialog(
+            tokenReceived = { token, clientId ->
+                authToken = token
+                prefs.edit().putString("api_token", token).putInt("client_id", clientId).apply()
+                WBApiClient.init(context, token, clientId)
+                showAuthDialog = false
+                loadOrdersFromAPI()
+            },
+            onCancel = { showAuthDialog = false }
+        )
+    }
+
+    if (isLoading) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = OnDarkPrimary)
+        }
+    }
 }
 
 @Composable
-fun AuthDialog(onTokenReceived: (String) -> Unit, onCancel: () -> Unit) {
+fun AuthDialog(tokenReceived: (String, Int) -> Unit, onCancel: () -> Unit) {
     var tokenInput by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest = {}, title = { Text("Авторизация WB API") }, text = {
-        Column {
-            Text("Вставьте Bearer токен:")
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(value = tokenInput, onValueChange = { tokenInput = it }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+    var clientIdText by remember { mutableStateOf("0") }
+
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("🔐 Доступ к WB API") },
+        text = {
+            Column {
+                Text("Вставьте Bearer токен:")
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = tokenInput,
+                    onValueChange = { tokenInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text("eyJhbGciOiJIUzI1NiIsInR...") }
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text("Client ID (магазин в WB FBS):")
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = clientIdText,
+                    onValueChange = { newText -> clientIdText = newText.filter { it.isDigit() }.take(10) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text("Например: 123456") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Где взять Client ID:",
+                    fontSize = TextSizeSmall,
+                    color = OnDarkSecondary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "WB FBS → Настройки → API доступ.\nОдин магазин = один Client ID.\nДанные сохраняются на устройстве.",
+                    fontSize = TextSizeSmall,
+                    color = OnDarkSecondary
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (tokenInput.isNotBlank() && clientIdText.toIntOrNull() != null) {
+                        tokenReceived(tokenInput, clientIdText.toInt())
+                    }
+                },
+                enabled = tokenInput.isNotBlank() && clientIdText.toIntOrNull() != null
+            ) { Text("Подключить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Отмена") }
         }
-    }, confirmButton = { Button(onClick = { if (tokenInput.isNotBlank()) onTokenReceived(tokenInput) }, enabled = tokenInput.isNotBlank()) { Text("Подключить") } }, dismissButton = { TextButton(onClick = onCancel) { Text("Отмена") } })
+    )
 }
