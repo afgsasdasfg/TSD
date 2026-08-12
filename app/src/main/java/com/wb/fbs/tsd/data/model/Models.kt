@@ -73,3 +73,10 @@ data class KizCode(
     val isValid: Boolean = true // Валидность кода
 )
 data class ReturnReason(val reason: String, val timestamp: Long = System.currentTimeMillis())
+// Добавь это куда-нибудь в Models.kt или отдельно в Auth.kt
+
+data class WBAuthorizeRequest(val api_key: String, val client_id: Int)
+data class WBAuthorizeResponse(val token: String, val expires_in: Int = 3600) {
+    val expires_at: Long = System.currentTimeMillis() + (expires_in * 1000L)
+    fun is_expired(): Boolean = System.currentTimeMillis() >= expires_at
+}

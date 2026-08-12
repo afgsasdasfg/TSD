@@ -1,11 +1,7 @@
 package com.wb.fbs.tsd.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Inventory2
-import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -31,8 +27,7 @@ fun HomeScreen(onNavigate: (String) -> Unit) {
 
         val buttons = listOf(
             Triple("📋 Приёмка товаров", "#4CAF50", "receiving"),
-            Triple("🚚 Сборка заказов", "#2196F3", "orders"),
-            Triple("🏷️ Маркировка", "#FF9800", "marking")
+            Triple("🚚 Сборка заказов", "#2196F3", "orders")
         )
 
         for ((label, colorHex, route) in buttons) {
@@ -44,5 +39,8 @@ fun HomeScreen(onNavigate: (String) -> Unit) {
                 Text(label, fontSize = 20.sp, fontWeight = FontWeight.Medium, color = Color.White)
             }
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Text("Маркировка доступна после сборки заказа", fontSize = TextSizeSmall, color = OnDarkSecondary)
     }
 }
