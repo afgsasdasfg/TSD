@@ -172,7 +172,7 @@ fun TsdApp() {
                 onOrderClick = { order ->
                     viewModel.markOrderScanned(order.id)
                 },
-                onScanKizForOrder = { orderId ->  // ← ЕСТЬ?
+                onScanKizForOrder = { orderId ->
                     navController.navigate("scan_kiz/$orderId")
                 },
                 onScanClick = { navController.navigate("scan") }
@@ -191,6 +191,19 @@ fun TsdApp() {
                     viewModel.scanKizForOrder(orderId, kizString)
                     viewModel.markOrderScanned(orderId)  // Автоматически ставим галку
                     navController.popBackStack()
+                }
+            )
+        }
+        composable("collected") {
+            CollectedOrdersScreen(
+                orders = orders,
+                onBackClick = { navController.popBackStack() },
+                onDeliverClick = { orderIds ->
+                    // TODO: Создать поставку, добавить заказы, передать в доставку
+                    viewModel.createSupplyAndDeliver(orderIds)
+                },
+                onShowQrClick = { supplyId ->
+                    // TODO: Показать QR
                 }
             )
         }

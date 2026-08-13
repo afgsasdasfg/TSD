@@ -31,7 +31,8 @@ fun HomeScreen(onNavigate: (String) -> Unit) {
         val buttons = listOf(
             listOf("📋", "Приёмка товаров", "#4CAF50", "receiving"),
             listOf("🚚", "Сборка заказов", "#9C27B0", "picking"),
-            listOf("📦", "Поставки", "#2196F3", "supplies"),
+            listOf("📦", "Собранные заказы", "#FF9800", "collected"),
+            //listOf("📦", "Поставки", "#2196F3", "supplies"),
             listOf("⚙️", "Настройки", "#757575", "settings")
         )
 

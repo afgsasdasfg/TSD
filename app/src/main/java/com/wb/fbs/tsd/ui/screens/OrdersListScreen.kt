@@ -17,12 +17,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.wb.fbs.tsd.data.db.OrderEntity
 import com.wb.fbs.tsd.ui.theme.*
-import com.wb.fbs.tsd.ui.viewmodel.OrdersUiState
+import com.wb.fbs.tsd.ui.viewmodel.OrdersViewModel
 
 @Composable
 fun OrderListScreen(
     orders: List<OrderEntity>,
-    uiState: OrdersUiState,
+    uiState: OrdersViewModel.OrdersUiState,
     onSyncClick: () -> Unit,
     onOrderClick: (OrderEntity) -> Unit,
     onScanClick: () -> Unit,

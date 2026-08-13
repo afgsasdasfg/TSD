@@ -280,7 +280,7 @@ class WbRepository(
             createdAt = parseDate(createdAt),
             supplyId = supplyId,
             status = "new",
-            isMarked = requiredMeta?.contains("sgtin") == true,
+            isMarked = (requiredMeta?.joinToString(",") ?: "").contains("sgtin") || (optionalMeta?.joinToString(",") ?: "").contains("sgtin"),// || true,
             sgtin = null,
             isSynced = true,
             scannedAt = null,

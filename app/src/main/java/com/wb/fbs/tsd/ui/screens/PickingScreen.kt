@@ -206,16 +206,14 @@ private fun SkuGroupCard(
                     Checkbox(
                         checked = isOrderScanned,
                         onCheckedChange = { checked ->
-                            if (checked) {
-                                if (hasKiz && !kizDone) {
-                                    // Нужен КИЗ — открываем камеру
-                                    onScanKizForOrder(order.id)
-                                } else {
-                                    // КИЗ не нужен или уже есть — просто отмечаем
-                                    onOrderClick(order)
-                                }
+                            android.util.Log.d("PICKING", "Checkbox changed: $checked, hasKiz=$hasKiz, kizDone=$kizDone")
+                            if (checked && hasKiz && !kizDone) {
+                                android.util.Log.d("PICKING", "Opening KIZ scanner for order ${order.id}")
+                                onScanKizForOrder(order.id)
+                            } else {
+                                onOrderClick(order)
                             }
-                        },
+                        }
                     )
                 }
 
