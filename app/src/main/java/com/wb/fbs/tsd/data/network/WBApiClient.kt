@@ -1,64 +1,49 @@
 package com.wb.fbs.tsd.data.network
 
+import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import com.wb.fbs.tsd.data.model.*
+import java.util.concurrent.TimeUnit
 
-object WBApiClient {
+object WbApiClient {
 
-    private const val BASE_URL_TEST = "https://api-test.wildberries.ru/"
-    var baseUrl: String = BASE_URL_TEST
+    private const val BASE_URL = "https://marketplace-api.wildberries.ru"
 
-    private lateinit var apiService: WBApiService
-    private var authToken: String? = null
-    private var clientId: Int = 0
+    private var apiService: WbApiService? = null
+    private var authToken: String = ""
 
-    fun init(context: android.content.Context, apiKey: String?, wbClientId: Int) {
-        if (!this::apiService.isInitialized) {
-            apiService = Retrofit.Builder()
-                .baseUrl(baseUrl)
-                .addConverterFactory(GsonConverterFactory.create())
-                .build()
-                .create(WBApiService::class.java)
-        }
-
-        // Сохраняем clientId только если передан ненулевой
-        if (wbClientId != 0) {
-            clientId = wbClientId
-            val sp = context.getSharedPreferences("wb_prefs", android.content.Context.MODE_PRIVATE)
-            sp.edit().putInt("client_id", clientId).apply()
-        }
-
-        authToken = apiKey
+    private val loggingInterceptor = HttpLoggingInterceptor().apply {
+        level = HttpLoggingInterceptor.Level.BODY
     }
 
-    suspend fun authenticate(apiKey: String): Result<WBAuthorizeResponse> = try {
-        val response = apiService.authorize(mapOf("apiKey" to apiKey))
-        if (response.isSuccessful && response.body()?.token != null) {
-            authToken = response.body()!!.token
-            Result.success(response.body()!!)
-        } else {
-            Result.failure(Exception("Авторизация провалилась: ${response.code()}"))
-        }
-    } catch (e: Exception) {
-        Result.failure(e)
+    fun init(token: String) {
+        authToken = token
+
+        val client = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .addHeader("Authorization", "Bearer $authToken")
+                    .addHeader("Content-Type", "application/json")
+                    .build()
+                chain.proceed(request)
+            }
+            .addInterceptor(loggingInterceptor)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+
+        apiService = Retrofit.Builder()
+            .baseUrl(BASE_URL)
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(WbApiService::class.java)
     }
 
-    suspend fun loadOrders(warehouseId: Int, page: Int = 1): Result<List<WBOrderDto>> = try {
-        require(::apiService.isInitialized) { "Сначала вызовите init()" }
-        val authHeader = "Bearer $authToken"
-        val response = apiService.getOrders(
-            auth = authHeader,
-            warehouseId = warehouseId,
-            page = page,
-            limit = 50
-        )
-        if (response.isSuccessful && response.body()?.data != null) {
-            Result.success(response.body()!!.data)
-        } else {
-            Result.failure(Exception("Заказы не получены: ${response.code()} ${response.errorBody()?.string()}"))
-        }
-    } catch (e: Exception) {
-        Result.failure(e)
+    fun getService(): WbApiService {
+        return apiService ?: throw IllegalStateException("WB API not initialized. Call init(token) first.")
     }
+
+    fun isInitialized(): Boolean = apiService != null
 }

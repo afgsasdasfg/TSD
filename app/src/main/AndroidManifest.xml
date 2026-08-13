@@ -1,25 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Камера для сканирования -->
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     <uses-permission android:name="android.permission.CAMERA" />
-    
-    <!-- Интернет для API -->
     <uses-permission android:name="android.permission.INTERNET" />
-    
-    <!-- Bluetooth для сканеров штрихкодов -->
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
 
     <application
+        android:name=".TsdApplication"
         android:allowBackup="true"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
-        
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -31,7 +27,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        
+
     </application>
 
 </manifest>
