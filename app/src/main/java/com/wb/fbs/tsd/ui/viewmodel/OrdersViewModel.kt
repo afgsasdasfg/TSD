@@ -3,6 +3,7 @@ package com.wb.fbs.tsd.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.wb.fbs.tsd.data.db.OrderEntity
+import com.wb.fbs.tsd.data.repository.KizScanResult
 import com.wb.fbs.tsd.data.repository.ScanResult
 import com.wb.fbs.tsd.data.repository.WbRepository
 import kotlinx.coroutines.flow.*
@@ -95,6 +96,45 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
                 .onFailure { error ->
                     _uiState.update { it.copy(isLoading = false, error = error.message) }
                 }
+        }
+    }
+    fun scanKiz(kizString: String) {
+        viewModelScope.launch {
+            when (val result = repository.scanKiz(kizString)) {
+                is KizScanResult.Success -> {
+                    _uiState.update { it.copy(
+                        scanResult = ScanUiResult.Success(
+                            orderId = result.order.id,
+                            article = result.order.article,
+                            size = result.order.size,
+                            requiresSgtin = result.order.isMarked
+                        ),
+                        sgtinSaved = true
+                    )}
+                }
+                is KizScanResult.OrderNotFound -> {
+                    _uiState.update { it.copy(
+                        scanResult = ScanUiResult.Error("Заказ с GTIN ${result.gtin} не найден")
+                    )}
+                }
+                is KizScanResult.InvalidFormat -> {
+                    _uiState.update { it.copy(
+                        scanResult = ScanUiResult.Error("Неверный формат КИЗ")
+                    )}
+                }
+            }
+        }
+    }
+
+    fun markOrderScanned(orderId: Long) {
+        viewModelScope.launch {
+            repository.markOrderScanned(orderId)
+        }
+    }
+
+    fun scanKizForOrder(orderId: Long, kizString: String) {
+        viewModelScope.launch {
+            repository.scanSgtin(orderId, kizString)
         }
     }
 }

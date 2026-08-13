@@ -2,10 +2,11 @@ package com.wb.fbs.tsd.data.repository
 
 import com.wb.fbs.tsd.data.db.*
 import com.wb.fbs.tsd.data.network.*
+import com.wb.fbs.tsd.utils.KizParser
 import kotlinx.coroutines.flow.Flow
 import java.text.SimpleDateFormat
 import java.util.*
-
+import kotlinx.coroutines.flow.first
 class WbRepository(
     private val orderDao: OrderDao,
     private val supplyDao: SupplyDao,
@@ -118,6 +119,54 @@ class WbRepository(
                 )
             )
             ScanResult.NotFound
+        }
+    }
+
+
+    /**
+     * Сканирование КИЗ — ищем заказ по GTIN/skuss
+     */
+    suspend fun scanKiz(kizString: String): KizScanResult {
+        val gtin = KizParser.extractGtin(kizString) ?: return KizScanResult.InvalidFormat
+
+        // Получаем список заказов из Flow
+        val allOrders: List<OrderEntity> = orderDao.getNewOrders().first()
+
+        val match: OrderEntity? = allOrders.find { order: OrderEntity ->
+            val barcode = order.barcode
+            barcode != null && (
+                    barcode.contains(gtin) ||
+                            barcode.contains(gtin.trimStart('0')) ||
+                            gtin.contains(barcode)
+                    )
+        }
+
+        return if (match != null) {
+            val sgtin = KizParser.toSgtin(kizString) ?: kizString
+            orderDao.setOrderSgtin(match.id, sgtin)
+            scanLogDao.insert(
+                ScanLogEntity(
+                    orderId = match.id,
+                    supplyId = null,
+                    scanType = "sgtin",
+                    scannedValue = kizString,
+                    success = true,
+                    errorMessage = null
+                )
+            )
+            KizScanResult.Success(match, sgtin)
+        } else {
+            scanLogDao.insert(
+                ScanLogEntity(
+                    orderId = null,
+                    supplyId = null,
+                    scanType = "sgtin",
+                    scannedValue = kizString,
+                    success = false,
+                    errorMessage = "Заказ с GTIN $gtin не найден"
+                )
+            )
+            KizScanResult.OrderNotFound(gtin)
         }
     }
 
@@ -247,10 +296,19 @@ class WbRepository(
             System.currentTimeMillis()
         }
     }
+
+    suspend fun markOrderScanned(orderId: Long) {
+        orderDao.markOrderScanned(orderId)
+    }
 }
 
 sealed class ScanResult {
     data class Success(val order: OrderEntity) : ScanResult()
     object NotFound : ScanResult()
     data class Error(val message: String) : ScanResult()
+}
+sealed class KizScanResult {
+    data class Success(val order: OrderEntity, val sgtin: String) : KizScanResult()
+    data class OrderNotFound(val gtin: String) : KizScanResult()
+    object InvalidFormat : KizScanResult()
 }

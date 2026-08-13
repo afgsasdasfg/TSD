@@ -1,5 +1,6 @@
 package com.wb.fbs.tsd.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,195 +16,294 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.wb.fbs.tsd.data.model.Order
-import com.wb.fbs.tsd.data.model.OrderItem
+import com.wb.fbs.tsd.data.db.OrderEntity
 import com.wb.fbs.tsd.ui.theme.*
 
 /**
- * Экран 2: Подготовка заказа (Сборка)
- * Группировка по артикулу+размеру: «Футболка белая L × 5» — одна карточка
- *
- * Обновление: логика сбора теперь работает через коллбек onItemPicked,
- * который вызывается при тапе на карточку товара.
+ * Группировка заказов по артикулу для сборки
+ * Как в WB: артикул → количество → прогресс
  */
 @Composable
 fun PickingScreen(
-    order: Order,
+    orders: List<OrderEntity>,
     onBackClick: () -> Unit,
-    onItemPicked: (OrderItem) -> Unit,
-    onNextClick: () -> Unit
+    onOrderClick: (OrderEntity) -> Unit,
+    onScanKizForOrder: (Long) -> Unit,
+    onScanClick: () -> Unit
 ) {
-    val totalItems = order.items.sumOf { it.quantity }
-    val pickedItems = order.items.sumOf { it.scannedQuantity }
-    val progress = if (totalItems > 0) pickedItems.toFloat() / totalItems else 0f
-    val isComplete = progress >= 1.0f
+    // Группировка по article + barcode (barcode = уникальный для размера)
+    val groupedBySku = remember(orders) {
+        orders.groupBy { "${it.article}|${it.barcode ?: "no-barcode"}" }
+            .toSortedMap() // Сортировка по артикулу
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(DarkBackground)
-            .padding(16.dp)
+            .padding(top = 32.dp, start = 16.dp, end = 16.dp, bottom = 16.dp)
     ) {
-        // Заголовок с навигацией
+        // Заголовок
         Row(
             modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(
-                onClick = onBackClick,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ArrowBack,
-                    contentDescription = "Назад",
-                    tint = OnDarkPrimary
-                )
+            IconButton(onClick = onBackClick) {
+                Icon(Icons.Default.ArrowBack, "Назад", tint = OnDarkPrimary)
             }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
             Text(
-                text = "📦 Сборка: ${order.clientName}",
+                "📦 Сборка заказов",
                 fontSize = TextSizeExtraLarge,
                 fontWeight = FontWeight.Bold,
                 color = OnDarkPrimary
             )
+            IconButton(onClick = onScanClick) {
+                Icon(Icons.Default.CheckCircle, "Сканировать", tint = PrimaryGreen)
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Прогресс сборки
+        // Статистика общая
+        val totalOrders = orders.size
+        val scannedOrders = orders.count { it.scannedAt != null }
+
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                LinearProgressIndicator(
-                    progress = progress,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp),
-                    color = if (isComplete) PrimaryGreen else InfoBlue,
-                    trackColor = DarkSurface
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
                 Text(
-                    text = "Собрано: $pickedItems из $totalItems",
+                    "Всего позиций: $totalOrders",
                     fontSize = TextSizeLarge,
                     fontWeight = FontWeight.Bold,
-                    color = if (isComplete) PrimaryGreen else OnDarkPrimary
+                    color = OnDarkPrimary
+                )
+                Text(
+                    "Собрано: $scannedOrders / $totalOrders",
+                    color = if (scannedOrders == totalOrders) PrimaryGreen else OnDarkSecondary
                 )
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Список товаров (сгруппированных)
+        // Список групп
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.fillMaxSize()
         ) {
-            items(order.items, key = { it.id }) { item ->
-                PickingItemCard(item = item, onPickClick = { onItemPicked(item) })
+            groupedBySku.forEach { (key, skuOrders) ->
+                val (article, barcode) = key.split("|", limit = 2)
+
+                item(key = key) {
+                    SkuGroupCard(
+                        article = article,
+                        barcode = barcode,
+                        orders = skuOrders,
+                        onOrderClick = onOrderClick,
+                        onScanKizForOrder = onScanKizForOrder
+                    )
+                }
             }
-        }
-        Spacer(modifier = Modifier.height(16.dp))
-        // Кнопка перехода к проверке
-        Button(
-            onClick = onNextClick,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(ButtonHeightLarge),
-            enabled = isComplete,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (isComplete) PrimaryGreen else InfoBlue,
-                disabledContainerColor = OnDarkDisabled
-            ),
-            shape = MaterialTheme.shapes.medium
-        ) {
-            Text(
-                text = "✅ К проверке",
-                fontSize = TextSizeLarge,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
         }
     }
 }
 
 @Composable
-private fun PickingItemCard(item: OrderItem, onPickClick: () -> Unit) {
-    val isFullyPicked = item.isFullyScanned
+private fun SkuGroupCard(
+    article: String,
+    barcode: String,
+    orders: List<OrderEntity>,
+    onOrderClick: (OrderEntity) -> Unit,
+    onScanKizForOrder: (Long) -> Unit
+) {
+    val total = orders.size
+    val scanned = orders.count { it.scannedAt != null }
+    val isComplete = scanned == total
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isComplete) DarkSurfaceVariant else DarkSurface
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Шапка группы
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = article,
+                        fontSize = TextSizeLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = OnDarkPrimary
+                    )
+                    Text(
+                        text = "Баркод: $barcode",
+                        fontSize = TextSizeSmall,
+                        color = OnDarkDisabled
+                    )
+                    Text(
+                        text = "Количество: $total шт",
+                        fontSize = TextSizeMedium,
+                        color = OnDarkSecondary
+                    )
+                }
+                if (isComplete) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = "Готово",
+                        tint = PrimaryGreen,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
+
+            // Прогресс-бар
+            LinearProgressIndicator(
+                progress = { scanned.toFloat() / total.toFloat() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                color = if (isComplete) PrimaryGreen else InfoBlue,
+                trackColor = OnDarkDisabled.copy(alpha = 0.3f)
+            )
+
+            // Список заказов (раскрывается по клику или всегда виден)
+            orders.forEachIndexed { index, order ->
+                val isOrderScanned = order.scannedAt != null
+                val hasKiz = order.isMarked
+                val kizDone = !order.sgtin.isNullOrBlank()
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOrderClick(order) }
+                        .padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "${index + 1}. Заказ ${order.id}",
+                            fontSize = TextSizeSmall,
+                            color = OnDarkSecondary
+                        )
+                        if (hasKiz) {
+                            Text(
+                                text = "КИЗ: ${order.sgtin ?: "—"}",
+                                fontSize = TextSizeSmall,
+                                color = if (kizDone) PrimaryGreen else WarningOrange
+                            )
+                        }
+                    }
+
+                    Checkbox(
+                        checked = isOrderScanned,
+                        onCheckedChange = { checked ->
+                            if (checked) {
+                                if (hasKiz && !kizDone) {
+                                    // Нужен КИЗ — открываем камеру
+                                    onScanKizForOrder(order.id)
+                                } else {
+                                    // КИЗ не нужен или уже есть — просто отмечаем
+                                    onOrderClick(order)
+                                }
+                            }
+                        },
+                    )
+                }
+
+                if (index < orders.size - 1) {
+                    Divider(
+                        modifier = Modifier.padding(vertical = 2.dp),
+                        color = OnDarkDisabled.copy(alpha = 0.2f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArticleGroupCard(
+    article: String,
+    orders: List<OrderEntity>,
+    onOrderClick: (OrderEntity) -> Unit
+) {
+    val total = orders.size
+    val scanned = orders.count { it.scannedAt != null }
+    val hasKiz = orders.any { it.isMarked }
+    val kizDone = orders.count { it.isMarked && !it.sgtin.isNullOrBlank() }
+    val isComplete = scanned == total && (!hasKiz || kizDone == orders.count { it.isMarked })
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = !isFullyPicked, onClick = onPickClick),
+            .clickable {
+                // Открываем детали — список заказов этого артикула
+                // TODO: навигация на детали
+            },
         colors = CardDefaults.cardColors(
-            containerColor = if (isFullyPicked) DarkSurfaceVariant else DarkSurface
+            containerColor = if (isComplete) DarkSurfaceVariant else DarkSurface
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        border = if (!isComplete && hasKiz && kizDone < orders.count { it.isMarked })
+            BorderStroke(2.dp, WarningOrange) else null
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "${item.name}",
-                    fontSize = TextSizeLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = OnDarkPrimary
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = "Арт: ${item.article} | ${item.color} | ${item.size}",
-                    fontSize = TextSizeMedium,
-                    color = OnDarkSecondary
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = "Штрихкод: ${item.barcode}",
-                    fontSize = TextSizeSmall,
-                    color = OnDarkDisabled
-                )
-            }
-
-            Column(
-                horizontalAlignment = Alignment.End,
-                modifier = Modifier.padding(start = 16.dp)
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "○",  // обычный кружок Unicode
-                    fontSize = TextSizeLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = OnDarkSecondary
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "× ${item.quantity}",
-                    fontSize = TextSizeExtraLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isFullyPicked) PrimaryGreen else OnDarkPrimary
-                )
-
-                Text(
-                    text = item.progressText,
-                    fontSize = TextSizeExtraLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isFullyPicked) PrimaryGreen else InfoBlue
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = article,
+                        fontSize = TextSizeLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = OnDarkPrimary
+                    )
+                    Text(
+                        text = "Количество: $total шт",
+                        fontSize = TextSizeMedium,
+                        color = OnDarkSecondary
+                    )
+                    Text(
+                        text = "Собрано: $scanned / $total",
+                        fontSize = TextSizeMedium,
+                        color = if (scanned == total) PrimaryGreen else WarningOrange
+                    )
+                    if (hasKiz) {
+                        Text(
+                            text = "КИЗ: $kizDone / ${orders.count { it.isMarked }}",
+                            fontSize = TextSizeSmall,
+                            color = if (kizDone == orders.count { it.isMarked }) PrimaryGreen else WarningOrange
+                        )
+                    }
+                }
+                if (isComplete) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = "Готово",
+                        tint = PrimaryGreen,
+                        modifier = Modifier.size(32.dp)
+                    )
+                } else {
+                    // Кнопка "Сканировать" для этого артикула
+                    Button(
+                        onClick = {
+                            // TODO: открыть сканер для этого артикула
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = InfoBlue)
+                    ) {
+                        Text("Скан", fontSize = TextSizeSmall)
+                    }
+                }
             }
         }
     }

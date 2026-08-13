@@ -2,6 +2,8 @@ package com.wb.fbs.tsd.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -25,18 +27,37 @@ fun HomeScreen(onNavigate: (String) -> Unit) {
         Text("📦 TSD Wildberries", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = OnDarkPrimary)
         Spacer(modifier = Modifier.height(32.dp))
 
+        // Единый формат: иконка (String эмодзи), текст, цвет, роут
         val buttons = listOf(
-            Triple("📋 Приёмка товаров", "#4CAF50", "receiving"),
-            Triple("🚚 Сборка заказов", "#2196F3", "orders")
+            listOf("📋", "Приёмка товаров", "#4CAF50", "receiving"),
+            listOf("🚚", "Сборка заказов", "#9C27B0", "picking"),
+            listOf("📦", "Поставки", "#2196F3", "supplies"),
+            listOf("⚙️", "Настройки", "#757575", "settings")
         )
 
-        for ((label, colorHex, route) in buttons) {
+        for (button in buttons) {
+            val icon = button[0] as String
+            val label = button[1] as String
+            val colorHex = button[2] as String
+            val route = button[3] as String
+
             Button(
                 onClick = { onNavigate(route) },
-                modifier = Modifier.fillMaxWidth().height(64.dp).padding(vertical = 8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(android.graphics.Color.parseColor(colorHex)))
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp)
+                    .padding(vertical = 8.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(android.graphics.Color.parseColor(colorHex))
+                )
             ) {
-                Text(label, fontSize = 20.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(icon, fontSize = 24.sp)
+                    Text(label, fontSize = 20.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                }
             }
         }
 

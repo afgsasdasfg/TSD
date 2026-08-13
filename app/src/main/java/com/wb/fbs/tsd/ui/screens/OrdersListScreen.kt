@@ -18,7 +18,6 @@ import androidx.compose.ui.unit.dp
 import com.wb.fbs.tsd.data.db.OrderEntity
 import com.wb.fbs.tsd.ui.theme.*
 import com.wb.fbs.tsd.ui.viewmodel.OrdersUiState
-import com.wb.fbs.tsd.ui.viewmodel.ScanUiResult
 
 @Composable
 fun OrderListScreen(
@@ -27,15 +26,20 @@ fun OrderListScreen(
     onSyncClick: () -> Unit,
     onOrderClick: (OrderEntity) -> Unit,
     onScanClick: () -> Unit,
-    onCreateSupplyClick: () -> Unit
+    onScanKizClick: () -> Unit,
+    onCreateSupplyClick: () -> Unit,
+    onSgtinEntered: (Long, String) -> Unit
 ) {
+    var showKizDialog by remember { mutableStateOf(false) }
+    var selectedOrder by remember { mutableStateOf<OrderEntity?>(null) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(DarkBackground)
-            .padding(16.dp)
+            .padding(top = 32.dp, start = 16.dp, end = 16.dp, bottom = 16.dp)
     ) {
-        // Заголовок
+        // ЗАГОЛОВОК С КНОПКАМИ
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -47,25 +51,40 @@ fun OrderListScreen(
                 fontWeight = FontWeight.Bold,
                 color = OnDarkPrimary
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 IconButton(onClick = onSyncClick) {
                     Icon(
-                        Icons.Default.CloudDownload,
-                        "Синхронизировать",
+                        imageVector = Icons.Default.CloudDownload,
+                        contentDescription = "Синхронизировать",
                         tint = InfoBlue
                     )
                 }
                 IconButton(onClick = onScanClick) {
                     Icon(
-                        Icons.Default.QrCodeScanner,
-                        "Сканировать",
+                        imageVector = Icons.Default.QrCodeScanner,
+                        contentDescription = "Сканировать товар",
                         tint = PrimaryGreen
+                    )
+                }
+                IconButton(onClick = onScanKizClick) {
+                    Icon(
+                        imageVector = Icons.Default.QrCodeScanner,
+                        contentDescription = "Сканировать КИЗ",
+                        tint = WarningOrange
                     )
                 }
             }
         }
 
         // Статус синхронизации
+        if (uiState.isLoading) {
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                color = InfoBlue
+            )
+        }
+
         uiState.error?.let { error ->
             Card(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -80,13 +99,6 @@ fun OrderListScreen(
             }
         }
 
-        if (uiState.isLoading) {
-            LinearProgressIndicator(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                color = InfoBlue
-            )
-        }
-
         if (uiState.lastSyncCount > 0 && uiState.error == null) {
             Text(
                 text = "✅ Загружено ${uiState.lastSyncCount} заказов",
@@ -96,40 +108,40 @@ fun OrderListScreen(
             )
         }
 
-        // Скан-результат
-        uiState.scanResult?.let { result ->
-            ScanResultCard(result = result, onDismiss = { /* clearScanResult */ })
-        }
-
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Список заказов
+        // ДИАЛОГ КИЗ
+        if (showKizDialog && selectedOrder != null) {
+            KizInputDialog(
+                order = selectedOrder!!,
+                onConfirm = { sgtin ->
+                    onSgtinEntered(selectedOrder!!.id, sgtin)
+                    showKizDialog = false
+                    selectedOrder = null
+                },
+                onDismiss = {
+                    showKizDialog = false
+                    selectedOrder = null
+                }
+            )
+        }
+
+        // СПИСОК ЗАКАЗОВ
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.fillMaxSize()
         ) {
             items(orders, key = { it.id }) { order ->
                 OrderCard(
                     order = order,
-                    onClick = { onOrderClick(order) }
-                )
-            }
-        }
-
-        // Кнопка создания поставки
-        if (orders.any { it.scannedAt != null && it.supplyId == null }) {
-            Button(
-                onClick = onCreateSupplyClick,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(ButtonHeightLarge)
-                    .padding(top = 8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = PrimaryGreen)
-            ) {
-                Text(
-                    "📦 Создать поставку (${orders.count { it.scannedAt != null && it.supplyId == null }})",
-                    fontSize = TextSizeLarge,
-                    fontWeight = FontWeight.Bold
+                    onClick = {
+                        if (order.isMarked && order.sgtin.isNullOrBlank()) {
+                            selectedOrder = order
+                            showKizDialog = true
+                        } else {
+                            onOrderClick(order)
+                        }
+                    }
                 )
             }
         }
@@ -173,12 +185,12 @@ private fun OrderCard(order: OrderEntity, onClick: () -> Unit) {
                         color = OnDarkPrimary
                     )
                     Text(
-                        text = "Размер: ${order.size ?: "—"} | Цвет: ${order.color ?: "—"}",
+                        text = "Штрихкод: ${order.barcode ?: "—"}",
                         fontSize = TextSizeMedium,
                         color = OnDarkSecondary
                     )
                     Text(
-                        text = "Штрихкод: ${order.barcode ?: "—"}",
+                        text = "nmId: ${order.nmId}",
                         fontSize = TextSizeSmall,
                         color = OnDarkDisabled
                     )
@@ -218,57 +230,6 @@ private fun OrderCard(order: OrderEntity, onClick: () -> Unit) {
                     fontSize = TextSizeSmall,
                     color = PrimaryGreen
                 )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ScanResultCard(result: ScanUiResult, onDismiss: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = when (result) {
-                is ScanUiResult.Success -> PrimaryGreen.copy(alpha = 0.2f)
-                is ScanUiResult.NotFound -> ErrorRed.copy(alpha = 0.2f)
-                is ScanUiResult.Error -> ErrorRed.copy(alpha = 0.2f)
-            }
-        )
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            when (result) {
-                is ScanUiResult.Success -> {
-                    Text(
-                        "✅ Найден: ${result.article}",
-                        color = PrimaryGreen,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = TextSizeLarge
-                    )
-                    Text(
-                        "Размер: ${result.size ?: "—"}",
-                        color = OnDarkPrimary
-                    )
-                    if (result.requiresSgtin) {
-                        Text(
-                            "⚠️ Требуется КИЗ!",
-                            color = WarningOrange,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-                is ScanUiResult.NotFound -> {
-                    Text(
-                        "❌ Заказ не найден",
-                        color = ErrorRed,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                is ScanUiResult.Error -> {
-                    Text(
-                        "❌ Ошибка: ${result.message}",
-                        color = ErrorRed
-                    )
-                }
             }
         }
     }

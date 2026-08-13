@@ -23,12 +23,24 @@ class TsdApplication : Application() {
             "tsd_database"
         ).build()
 
-        // Repository без API — инициализируем позже
         repository = WbRepository(
             orderDao = database.orderDao(),
             supplyDao = database.supplyDao(),
             scanLogDao = database.scanLogDao()
         )
+
+        // ВОССТАНАВЛИВАЕМ API ПРИ СТАРТЕ
+        val prefs = getSharedPreferences("wb_prefs", MODE_PRIVATE)
+        val savedToken = prefs.getString("api_token", null)
+        if (!savedToken.isNullOrBlank()) {
+            try {
+                WbApiClient.init(savedToken)
+                repository.setApiService(WbApiClient.getService())
+            } catch (e: Exception) {
+                // Токен невалидный — очистим
+                prefs.edit().remove("api_token").apply()
+            }
+        }
 
         instance = this
     }
