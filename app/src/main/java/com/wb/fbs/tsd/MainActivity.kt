@@ -227,18 +227,31 @@ fun AppNavigator(initialOrders: List<Order>) {
         }
     }
 
+    // Показываем AuthDialog при первом запуске
     if (!hasStoredCredentials) {
         AuthDialog(
-            tokenReceived = { token, clientId ->
-                authToken = token
-                prefs.edit().putString("api_token", token).putInt("client_id", clientId).apply()
-                WBApiClient.init(context, token, clientId)
-                showAuthDialog = false
-                loadOrdersFromAPI()
+            tokenReceived = { token: String, clientId: Int ->
+                try {
+                    val trimmedToken = token.trim()
+
+                    authToken = trimmedToken
+                    prefs.edit().putString("api_token", trimmedToken).putInt("client_id", clientId).apply()
+                    WBApiClient.init(context, trimmedToken, clientId)
+
+                    showAuthDialog = false
+                    loadOrdersFromAPI()
+                } catch (e: Exception) {
+                    // Лямбда не выполнится полностью → диалог не исчезнет, пользователь увидит проблему
+                    println("Auth failed: ${e.message}")
+                }
             },
-            onCancel = { showAuthDialog = false }
+            onCancel = {
+                showAuthDialog = false
+                // Можно добавить логику выхода из приложения или показа demo-режима
+            }
         )
     }
+
 
     if (isLoading) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -251,9 +264,10 @@ fun AppNavigator(initialOrders: List<Order>) {
 fun AuthDialog(tokenReceived: (String, Int) -> Unit, onCancel: () -> Unit) {
     var tokenInput by remember { mutableStateOf("") }
     var clientIdText by remember { mutableStateOf("0") }
+    var errorText by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
-        onDismissRequest = {},
+        onDismissRequest = onCancel,
         title = { Text("🔐 Доступ к WB API") },
         text = {
             Column {
@@ -281,6 +295,13 @@ fun AuthDialog(tokenReceived: (String, Int) -> Unit, onCancel: () -> Unit) {
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
+
+                // Сообщение об ошибке
+                errorText?.let { err ->
+                    Text(err, color = ErrorRed, fontSize = TextSizeSmall)
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
                 Text(
                     "Где взять Client ID:",
                     fontSize = TextSizeSmall,
@@ -297,8 +318,18 @@ fun AuthDialog(tokenReceived: (String, Int) -> Unit, onCancel: () -> Unit) {
         confirmButton = {
             Button(
                 onClick = {
-                    if (tokenInput.isNotBlank() && clientIdText.toIntOrNull() != null) {
-                        tokenReceived(tokenInput, clientIdText.toInt())
+                    val trimmed = tokenInput.trim()
+                    val cid = clientIdText.toIntOrNull()
+
+                    errorText = when {
+                        trimmed.isBlank() -> "Токен пустой"
+                        cid == null -> "Client ID — только цифры"
+                        cid <= 0 -> "Client ID должен быть > 0"
+                        else -> {
+                            // Всё ок — передаём данные
+                            tokenReceived(trimmed, cid!!)
+                            null  // чистим ошибку если лямбда сработала
+                        }
                     }
                 },
                 enabled = tokenInput.isNotBlank() && clientIdText.toIntOrNull() != null
@@ -309,3 +340,4 @@ fun AuthDialog(tokenReceived: (String, Int) -> Unit, onCancel: () -> Unit) {
         }
     )
 }
+
