@@ -52,4 +52,11 @@ interface OrderDao {
 
     @Query("UPDATE orders SET isSynced = 1 WHERE id = :orderId")
     suspend fun markOrderSynced(orderId: Long)
+
+    @Query("SELECT * FROM orders")
+    fun getAllOrders(): Flow<List<OrderEntity>>
+
+    @Delete
+    suspend fun deleteOrder(order: OrderEntity)
+
 }

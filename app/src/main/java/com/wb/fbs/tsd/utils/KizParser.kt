@@ -13,6 +13,71 @@ object KizParser {
      * - https://id.gs1.org/01/04607940693277/21/12345678 (Digital Link)
      * - 04607940693277 (чистый GTIN)
      */
+
+    fun validateFull(kizString: String, expectedBarcode: String? = null): KizValidationResult {
+        val cleaned = kizString.trim()
+
+        // 1. Длина
+        if (cleaned.length < 20) {
+            return KizValidationResult.Invalid("КИЗ слишком короткий (${cleaned.length} симв., нужно 20+)")
+        }
+
+        // 2. GTIN
+        val gtin = extractGtin(cleaned)
+            ?: return KizValidationResult.Invalid("GTIN не найден. Формат: 01 + 14 цифр")
+
+        // 3. Контрольная сумма GTIN
+        if (!isValidGtinChecksum(gtin)) {
+            return KizValidationResult.Invalid("Неверная контрольная сумма GTIN $gtin")
+        }
+
+        // 4. Серийный номер
+        val serial = extractSerial(cleaned)
+            ?: return KizValidationResult.Invalid("Серийный номер не найден (после 21)")
+
+        if (serial.length < 6) {
+            return KizValidationResult.Invalid("Серийный номер слишком короткий: $serial")
+        }
+
+        // 5. Соответствие заказу
+        if (expectedBarcode != null) {
+            val expectedGtin = extractGtin(expectedBarcode)
+                ?: expectedBarcode.filter { it.isDigit() }.padStart(14, '0')
+
+            if (gtin != expectedGtin) {
+                return KizValidationResult.Invalid(
+                    "Несовпадение GTIN!\n" +
+                            "КИЗ: $gtin\n" +
+                            "Товар: $expectedGtin\n" +
+                            "Этот КИЗ от другого товара"
+                )
+            }
+        }
+
+        // 6. SGTIN
+        val sgtin = gtin + serial
+
+        return KizValidationResult.Valid(gtin, serial, sgtin)
+    }
+
+    /**
+     * Проверка контрольной суммы GTIN-14
+     */
+    private fun isValidGtinChecksum(gtin: String): Boolean {
+        if (gtin.length != 14 || !gtin.all { it.isDigit() }) return false
+
+        val digits = gtin.map { it.digitToInt() }
+        val sum = digits.take(13).mapIndexed { index, digit ->
+            if (index % 2 == 0) digit * 3 else digit
+        }.sum()
+
+        val checkDigit = (10 - (sum % 10)) % 10
+        return checkDigit == digits[13]
+    }
+
+    /**
+     * Извлекает GTIN из строки КИЗ
+     */
     fun extractGtin(kizString: String): String? {
         val cleaned = kizString.trim()
 
@@ -60,7 +125,6 @@ object KizParser {
 
     /**
      * Полный КИЗ для отправки в WB (sgtin)
-     * Формат: GTIN + Serial (без разделителей)
      */
     fun toSgtin(kizString: String): String? {
         val gtin = extractGtin(kizString) ?: return null
@@ -74,4 +138,9 @@ object KizParser {
     fun isValidKizFormat(kizString: String): Boolean {
         return extractGtin(kizString) != null
     }
+}
+
+sealed class KizValidationResult {
+    data class Valid(val gtin: String, val serial: String, val sgtin: String) : KizValidationResult()
+    data class Invalid(val reason: String) : KizValidationResult()
 }

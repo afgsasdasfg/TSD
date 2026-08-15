@@ -1,6 +1,8 @@
 package com.wb.fbs.tsd.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocalShipping
@@ -14,8 +16,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.wb.fbs.tsd.ui.theme.*
 
+// ui/screens/HomeScreen.kt — добавить кнопку
+
 @Composable
-fun HomeScreen(onNavigate: (String) -> Unit) {
+fun HomeScreen(
+    onNavigate: (String) -> Unit,
+    onSyncClick: () -> Unit,
+    lastSyncTime: Long = 0,  // ← ДОБАВИТЬ
+    isLoading: Boolean = false  // ← ДОБАВИТЬ
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -24,16 +33,58 @@ fun HomeScreen(onNavigate: (String) -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("📦 TSD Wildberries", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = OnDarkPrimary)
+        Text(
+            "📦 TSD Wildberries",
+            fontSize = 36.sp,
+            fontWeight = FontWeight.Bold,
+            color = OnDarkPrimary
+        )
         Spacer(modifier = Modifier.height(32.dp))
 
-        // Единый формат: иконка (String эмодзи), текст, цвет, роут
+        // Кнопка синхронизации с временем
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp)
+                .clickable(enabled = !isLoading) { onSyncClick() },
+            colors = CardDefaults.cardColors(
+                containerColor = if (isLoading)
+                    InfoBlue.copy(alpha = 0.3f)
+                else
+                    DarkSurfaceVariant
+            ),
+            border = if (isLoading) BorderStroke(2.dp, InfoBlue) else null
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    if (isLoading) "⏳" else "☁️",
+                    fontSize = 24.sp
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(
+                        if (isLoading) "Синхронизация..." else "Проверить обновления",
+                        color = if (isLoading) InfoBlue else OnDarkPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = TextSizeLarge
+                    )
+                    if (lastSyncTime > 0 && !isLoading) {
+                        Text(
+                            "Последняя: ${formatTime(lastSyncTime)}",
+                            color = OnDarkSecondary,
+                            fontSize = TextSizeSmall
+                        )
+                    }
+                }
+            }
+        }
+
         val buttons = listOf(
-            listOf("📋", "Приёмка товаров", "#4CAF50", "receiving"),
             listOf("🚚", "Сборка заказов", "#9C27B0", "picking"),
-            listOf("📦", "Собранные заказы", "#FF9800", "collected"),
-            //listOf("📦", "Поставки", "#2196F3", "supplies"),
-            listOf("⚙️", "Настройки", "#757575", "settings")
+            listOf("📦", "Собранные заказы", "#FF9800", "collected")
         )
 
         for (button in buttons) {
@@ -63,6 +114,24 @@ fun HomeScreen(onNavigate: (String) -> Unit) {
         }
 
         Spacer(modifier = Modifier.height(16.dp))
-        Text("Маркировка доступна после сборки заказа", fontSize = TextSizeSmall, color = OnDarkSecondary)
+        Text(
+            "Маркировка доступна после сборки заказа",
+            fontSize = TextSizeSmall,
+            color = OnDarkSecondary
+        )
+    }
+}
+
+// Форматирование времени
+private fun formatTime(timestamp: Long): String {
+    val diff = System.currentTimeMillis() - timestamp
+    return when {
+        diff < 60_000 -> "только что"
+        diff < 3_600_000 -> "${diff / 60_000} мин. назад"
+        diff < 86_400_000 -> "${diff / 3_600_000} ч. назад"
+        else -> {
+            val sdf = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault())
+            sdf.format(java.util.Date(timestamp))
+        }
     }
 }

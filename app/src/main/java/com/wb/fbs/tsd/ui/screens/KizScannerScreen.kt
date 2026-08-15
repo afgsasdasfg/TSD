@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -30,12 +31,15 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import com.wb.fbs.tsd.ui.theme.*
 import com.wb.fbs.tsd.utils.KizParser
+import com.wb.fbs.tsd.utils.KizValidationResult
+import com.wb.fbs.tsd.utils.ScanFeedback
 import java.util.concurrent.Executors
 
 @Composable
 fun KizScannerScreen(
     onBackClick: () -> Unit,
-    onKizScanned: (String) -> Unit  // Полная строка КИЗ
+    onKizScanned: (String) -> Unit,
+    orderBarcode: String? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -99,7 +103,7 @@ fun KizScannerScreen(
                             if (!value.isNullOrBlank() && KizParser.isValidKizFormat(value)) {
                                 scannedKiz = value
                                 isScanning = false
-                                onKizScanned(value)
+                                ScanFeedback.success(context)
                             }
                         }
                     }
@@ -118,7 +122,7 @@ fun KizScannerScreen(
                             color = Color.White,
                             fontSize = TextSizeLarge,
                             fontWeight = FontWeight.Bold,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
@@ -136,36 +140,92 @@ fun KizScannerScreen(
             }
         }
 
-        // Результат
+        // Результат валидации
         scannedKiz?.let { kiz ->
+            val validation = remember(kiz) {
+                KizParser.validateFull(kiz, orderBarcode)
+            }
+
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-                colors = CardDefaults.cardColors(containerColor = PrimaryGreen.copy(alpha = 0.2f))
+                colors = CardDefaults.cardColors(
+                    containerColor = when (validation) {
+                        is KizValidationResult.Valid -> PrimaryGreen.copy(alpha = 0.2f)
+                        is KizValidationResult.Invalid -> ErrorRed.copy(alpha = 0.2f)
+                    }
+                )
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        "✅ КИЗ отсканирован",
-                        color = PrimaryGreen,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = TextSizeLarge
-                    )
-                    Text(
-                        "GTIN: ${KizParser.extractGtin(kiz) ?: "—"}",
-                        color = OnDarkPrimary,
-                        fontSize = TextSizeMedium
-                    )
+                    when (validation) {
+                        is KizValidationResult.Valid -> {
+                            Text(
+                                "✅ КИЗ ВАЛИДЕН",
+                                color = PrimaryGreen,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = TextSizeLarge
+                            )
+                            Text(
+                                "GTIN: ${validation.gtin}",
+                                color = OnDarkPrimary,
+                                fontSize = TextSizeMedium
+                            )
+                            Text(
+                                "Серия: ${validation.serial}",
+                                color = OnDarkSecondary,
+                                fontSize = TextSizeSmall
+                            )
+                            if (orderBarcode != null) {
+                                Text(
+                                    "✅ Совпадает с товаром",
+                                    color = PrimaryGreen,
+                                    fontSize = TextSizeMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        is KizValidationResult.Invalid -> {
+                            Text(
+                                "❌ КИЗ ОТКЛОНЁН",
+                                color = ErrorRed,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = TextSizeLarge
+                            )
+                            Text(
+                                validation.reason,
+                                color = ErrorRed,
+                                fontSize = TextSizeMedium
+                            )
+                            Text(
+                                "⚠️ Не упаковывайте этот товар!",
+                                color = WarningOrange,
+                                fontSize = TextSizeMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(
                         onClick = {
+                            if (validation is KizValidationResult.Valid) {
+                                onKizScanned(kiz)
+                            }
                             scannedKiz = null
                             isScanning = true
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = InfoBlue)
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (validation is KizValidationResult.Valid) PrimaryGreen else InfoBlue
+                        )
                     ) {
-                        Text("📷 Сканировать ещё")
+                        Text(
+                            if (validation is KizValidationResult.Valid) "✅ Подтвердить и сохранить"
+                            else "📷 Сканировать другой КИЗ",
+                            fontSize = TextSizeLarge,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }

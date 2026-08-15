@@ -1,5 +1,8 @@
 package com.wb.fbs.tsd.data.repository
 
+import retrofit2.Response
+import kotlin.Result
+import kotlinx.coroutines.delay
 import com.wb.fbs.tsd.data.db.*
 import com.wb.fbs.tsd.data.network.*
 import com.wb.fbs.tsd.utils.KizParser
@@ -39,60 +42,117 @@ class WbRepository(
 
     // ==================== SYNC: Загрузка новых заказов ====================
 
-    suspend fun syncNewOrders(): Result<Int> = try {
-        val response = requireApi().getNewOrders()
-        if (response.isSuccessful) {
-            val orders = response.body()?.orders?.map { it.toEntity() } ?: emptyList()
-            orderDao.insertOrders(orders)
-            Result.success(orders.size)
-        } else {
-            Result.failure(Exception("HTTP ${response.code()}"))
+    // Пример: syncNewOrders с retry
+    // WbRepository.kt — обновить syncNewOrders()
+
+    suspend fun syncNewOrders(): kotlin.Result<Int> = safeApiCall {
+        requireApi().getNewOrders()
+    }.map { response ->
+        val serverOrders = response.orders?.map { it.toEntity() } ?: emptyList()
+        val serverOrderIds = serverOrders.map { it.id }.toSet()
+
+        // 1. Получаем локальные заказы
+        val localOrders = orderDao.getAllOrders().first()
+        val localOrderIds = localOrders.map { it.id }.toSet()
+
+        // 2. Добавляем новые заказы с сервера
+        orderDao.insertOrders(serverOrders)
+
+        // 3. Удаляем заказы, которых больше нет на сервере
+        // (если они уже собраны и синхронизированы)
+        val toDelete = localOrders.filter {
+            it.id !in serverOrderIds && it.isSynced && it.status == "complete"
         }
-    } catch (e: Exception) {
-        Result.failure(e)
-    }
+        toDelete.forEach { orderDao.deleteOrder(it) }
 
-    // ==================== SYNC: Статусы ====================
-
-    suspend fun syncStatuses(orderIds: List<Long>): Result<Unit> = try {
-        val response = requireApi().getOrdersStatus(WbStatusRequest(orderIds))
-        if (response.isSuccessful) {
-            response.body()?.orders?.forEach { statusDto ->
-                val order = orderDao.getOrderById(statusDto.id) ?: return@forEach
-                orderDao.updateOrder(order.copy(status = statusDto.supplierStatus))
+        // 4. Обновляем статусы существующих
+        serverOrders.forEach { serverOrder ->
+            val local = localOrders.find { it.id == serverOrder.id }
+            if (local != null && local.status != serverOrder.status) {
+                orderDao.updateOrder(local.copy(status = serverOrder.status))
             }
-            Result.success(Unit)
-        } else {
-            Result.failure(Exception("HTTP ${response.code()}"))
         }
-    } catch (e: Exception) {
-        Result.failure(e)
+
+        serverOrders.size
     }
 
-    // ==================== SYNC: Стикеры ====================
+    suspend fun createSupply(name: String): kotlin.Result<String> = safeApiCall {
+        requireApi().createSupply(WbCreateSupplyRequest(name))
+    }.map { response ->
+        val supplyId = response.id
+        supplyDao.insertSupply(
+            SupplyEntity(
+                id = supplyId,
+                name = name,
+                createdAt = System.currentTimeMillis(),
+                closedAt = null,
+                scanDt = null,
+                cargoType = 0,
+                crossBorderType = 0,
+                destinationOfficeId = null,
+                isDone = false,
+                isB2b = false,
+                orderCount = 0,
+                isSynced = true,
+                qrCodeSvg = null,
+                status = "active"
+            )
+        )
+        supplyId
+    }
 
-    suspend fun downloadStickers(orderIds: List<Long>): Result<List<WbStickerDto>> = try {
-        val response = requireApi().getStickers(
+    suspend fun addOrdersToSupply(supplyId: String, orderIds: List<Long>): kotlin.Result<Unit> = safeApiCall {
+        requireApi().addOrdersToSupply(supplyId, WbAddOrdersToSupplyRequest(orderIds))
+    }.map {
+        orderDao.addOrdersToSupply(orderIds, supplyId)
+    }
+
+    suspend fun deliverSupply(supplyId: String): kotlin.Result<Unit> = safeApiCall {
+        requireApi().deliverSupply(supplyId)
+    }.map {
+        supplyDao.markSupplyDelivered(supplyId)
+    }
+
+    suspend fun scanSgtin(orderId: Long, sgtin: String): kotlin.Result<Unit> = safeApiCall {
+        requireApi().setSgtin(orderId, WbSgtinRequest(sgtin))
+    }.map {
+        orderDao.setOrderSgtin(orderId, sgtin)
+        orderDao.markOrderSynced(orderId)
+    }
+
+    suspend fun downloadStickers(orderIds: List<Long>): kotlin.Result<List<WbStickerDto>> = safeApiCall {
+        requireApi().getStickers(
             type = "svg",
             width = 58,
             height = 40,
             request = WbStickerRequest(orderIds)
         )
-        if (response.isSuccessful) {
-            Result.success(response.body()?.stickers ?: emptyList())
-        } else {
-            Result.failure(Exception("HTTP ${response.code()}"))
+    }.map { response ->
+        response.stickers ?: emptyList()
+    }
+
+    suspend fun syncStatuses(orderIds: List<Long>): kotlin.Result<Unit> = safeApiCall {
+        requireApi().getOrdersStatus(WbStatusRequest(orderIds))
+    }.map { response ->
+        response.orders?.forEach { statusDto ->
+            val order = orderDao.getOrderById(statusDto.id) ?: return@forEach
+            orderDao.updateOrder(order.copy(status = statusDto.supplierStatus))
         }
-    } catch (e: Exception) {
-        Result.failure(e)
     }
 
     // ==================== OFFLINE: Сканирование ====================
-
     suspend fun scanBarcode(barcode: String): ScanResult {
-        val orders = orderDao.getOrdersByArticleSize(barcode, null)
-        val exactMatch = orders.firstOrNull { it.barcode == barcode }
-            ?: orders.firstOrNull()
+        val allOrders: List<OrderEntity> = orderDao.getNewOrders().first()
+
+        // 1. Точное совпадение по barcode
+        val exactMatch = allOrders.find { it.barcode == barcode }
+        // 2. Частичное совпадение (если штрихкод сканером считался не полностью)
+            ?: allOrders.find {
+                it.barcode != null && (
+                        it.barcode.contains(barcode) ||
+                                barcode.contains(it.barcode)
+                        )
+            }
 
         return if (exactMatch != null) {
             orderDao.markOrderScanned(exactMatch.id)
@@ -115,7 +175,7 @@ class WbRepository(
                     scanType = "barcode",
                     scannedValue = barcode,
                     success = false,
-                    errorMessage = "Заказ не найден"
+                    errorMessage = "Заказ со штрихкодом $barcode не найден"
                 )
             )
             ScanResult.NotFound
@@ -170,91 +230,6 @@ class WbRepository(
         }
     }
 
-    suspend fun scanSgtin(orderId: Long, sgtin: String): Result<Unit> = try {
-        val response = requireApi().setSgtin(orderId, WbSgtinRequest(sgtin))
-        if (response.isSuccessful) {
-            orderDao.setOrderSgtin(orderId, sgtin)
-            scanLogDao.insert(
-                ScanLogEntity(
-                    orderId = orderId,
-                    supplyId = null,
-                    scanType = "sgtin",
-                    scannedValue = sgtin,
-                    success = true,
-                    errorMessage = null
-                )
-            )
-            Result.success(Unit)
-        } else {
-            // Offline fallback
-            orderDao.setOrderSgtin(orderId, sgtin)
-            Result.failure(Exception("HTTP ${response.code()}, сохранено локально"))
-        }
-    } catch (e: Exception) {
-        // Offline fallback
-        orderDao.setOrderSgtin(orderId, sgtin)
-        Result.failure(Exception("Оффлайн: ${e.message}"))
-    }
-
-    // ==================== ПОСТАВКИ ====================
-
-    suspend fun createSupply(name: String): Result<String> = try {
-        val response = requireApi().createSupply(WbCreateSupplyRequest(name))
-        if (response.isSuccessful) {
-            val supplyId = response.body()?.id ?: throw Exception("No supply ID")
-            supplyDao.insertSupply(
-                SupplyEntity(
-                    id = supplyId,
-                    name = name,
-                    createdAt = System.currentTimeMillis(),
-                    closedAt = null,
-                    scanDt = null,
-                    cargoType = 0,
-                    crossBorderType = 0,
-                    destinationOfficeId = null,
-                    isDone = false,
-                    isB2b = false,
-                    orderCount = 0,
-                    isSynced = true,
-                    qrCodeSvg = null,
-                    status = "active"
-                )
-            )
-            Result.success(supplyId)
-        } else {
-            Result.failure(Exception("HTTP ${response.code()}"))
-        }
-    } catch (e: Exception) {
-        Result.failure(e)
-    }
-
-    suspend fun addOrdersToSupply(supplyId: String, orderIds: List<Long>): Result<Unit> = try {
-        val response = requireApi().addOrdersToSupply(
-            supplyId,
-            WbAddOrdersToSupplyRequest(orderIds)
-        )
-        if (response.isSuccessful) {
-            orderDao.addOrdersToSupply(orderIds, supplyId)
-            Result.success(Unit)
-        } else {
-            Result.failure(Exception("HTTP ${response.code()}"))
-        }
-    } catch (e: Exception) {
-        Result.failure(e)
-    }
-
-    suspend fun deliverSupply(supplyId: String): Result<Unit> = try {
-        val response = requireApi().deliverSupply(supplyId)
-        if (response.isSuccessful) {
-            supplyDao.markSupplyDelivered(supplyId)
-            Result.success(Unit)
-        } else {
-            Result.failure(Exception("HTTP ${response.code()}"))
-        }
-    } catch (e: Exception) {
-        Result.failure(e)
-    }
-
     // ==================== УТИЛИТЫ ====================
 
     private fun WbOrderDto.toEntity(): OrderEntity {
@@ -296,10 +271,82 @@ class WbRepository(
             System.currentTimeMillis()
         }
     }
-
+    suspend fun getUnsyncedOrders(): List<OrderEntity> = orderDao.getUnsyncedOrders()
     suspend fun markOrderScanned(orderId: Long) {
         orderDao.markOrderScanned(orderId)
     }
+    private suspend fun <T> safeApiCall(
+        maxRetries: Int = 3,
+        block: suspend () -> retrofit2.Response<T>
+    ): kotlin.Result<T> {
+        var lastException: Exception? = null
+
+        repeat(maxRetries) { attempt ->
+            try {
+                val response = block()
+
+                when (response.code()) {
+                    200, 201, 204 -> {
+                        val body = response.body()
+                        return if (body != null) {
+                            kotlin.Result.success(body)
+                        } else {
+                            @Suppress("UNCHECKED_CAST")
+                            kotlin.Result.success(Unit as T)
+                        }
+                    }
+                    401 -> {
+                        return kotlin.Result.failure(
+                            ApiException.Unauthorized("Токен невалиден. Авторизуйтесь заново.")
+                        )
+                    }
+                    429 -> {
+                        val delayMs = (1 shl attempt) * 1000L
+                        delay(delayMs)
+                        lastException = ApiException.RateLimit("429, retry ${attempt + 1}/$maxRetries")
+                    }
+                    500, 502, 503, 504 -> {
+                        val delayMs = (1 shl attempt) * 1000L
+                        delay(delayMs)
+                        lastException = ApiException.ServerError(
+                            "HTTP ${response.code()}, retry ${attempt + 1}/$maxRetries"
+                        )
+                    }
+                    else -> {
+                        return kotlin.Result.failure(
+                            ApiException.HttpError(
+                                response.code(),
+                                response.errorBody()?.string() ?: "Unknown error"
+                            )
+                        )
+                    }
+                }
+            } catch (e: java.net.SocketTimeoutException) {
+                lastException = ApiException.Timeout("Таймаут, retry ${attempt + 1}/$maxRetries")
+                delay(2000)
+            } catch (e: java.net.UnknownHostException) {
+                return kotlin.Result.failure(ApiException.NoInternet("Нет подключения к интернету"))
+            } catch (e: Exception) {
+                lastException = e
+                delay(1000)
+            }
+        }
+
+        return kotlin.Result.failure(lastException ?: Exception("Unknown error"))
+    }
+
+    // Sealed class для ошибок
+    sealed class ApiException(message: String) : Exception(message) {
+        class Unauthorized(message: String) : ApiException(message)
+        class RateLimit(message: String) : ApiException(message)
+        class ServerError(message: String) : ApiException(message)
+        class HttpError(val code: Int, message: String) : ApiException("HTTP $code: $message")
+        class Timeout(message: String) : ApiException(message)
+        class NoInternet(message: String) : ApiException(message)
+    }
+
+
+
 }
 
 sealed class ScanResult {
@@ -311,4 +358,13 @@ sealed class KizScanResult {
     data class Success(val order: OrderEntity, val sgtin: String) : KizScanResult()
     data class OrderNotFound(val gtin: String) : KizScanResult()
     object InvalidFormat : KizScanResult()
+}
+// Sealed class для типизации ошибок
+sealed class ApiException(message: String) : Exception(message) {
+    class Unauthorized(message: String) : ApiException(message)
+    class RateLimit(message: String) : ApiException(message)
+    class ServerError(message: String) : ApiException(message)
+    class HttpError(val code: Int, message: String) : ApiException("HTTP $code: $message")
+    class Timeout(message: String) : ApiException(message)
+    class NoInternet(message: String) : ApiException(message)
 }

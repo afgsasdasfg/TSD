@@ -17,12 +17,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.wb.fbs.tsd.data.db.OrderEntity
 import com.wb.fbs.tsd.ui.theme.*
-import com.wb.fbs.tsd.ui.viewmodel.OrdersViewModel
+import com.wb.fbs.tsd.ui.viewmodel.OrdersUiState  // ← ПРЯМОЙ ИМПОРТ
 
 @Composable
 fun OrderListScreen(
     orders: List<OrderEntity>,
-    uiState: OrdersViewModel.OrdersUiState,
+    uiState: OrdersUiState,  // ← БЕЗ OrdersViewModel.
     onSyncClick: () -> Unit,
     onOrderClick: (OrderEntity) -> Unit,
     onScanClick: () -> Unit,
@@ -39,7 +39,7 @@ fun OrderListScreen(
             .background(DarkBackground)
             .padding(top = 32.dp, start = 16.dp, end = 16.dp, bottom = 16.dp)
     ) {
-        // ЗАГОЛОВОК С КНОПКАМИ
+        // ЗАГОЛОВОК
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -99,9 +99,13 @@ fun OrderListScreen(
             }
         }
 
-        if (uiState.lastSyncCount > 0 && uiState.error == null) {
+        // ← ИСПРАВЛЕНО: убрано if вне Composable, заменено на remember
+        val syncText = remember(uiState.lastSyncCount, uiState.error) {
+            if (uiState.lastSyncCount > 0 && uiState.error == null) "✅ Загружено ${uiState.lastSyncCount} заказов" else null
+        }
+        syncText?.let {
             Text(
-                text = "✅ Загружено ${uiState.lastSyncCount} заказов",
+                text = it,
                 color = PrimaryGreen,
                 fontSize = TextSizeSmall,
                 modifier = Modifier.padding(vertical = 4.dp)

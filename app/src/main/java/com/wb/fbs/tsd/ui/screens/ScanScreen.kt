@@ -22,7 +22,7 @@ fun ScanScreen(
     article: String?,
     size: String?
 ) {
-    var scanMode by remember { mutableStateOf("barcode") } // barcode | sgtin
+    var scanMode by remember { mutableStateOf("barcode") }
     var input by remember { mutableStateOf("") }
 
     Column(
@@ -48,37 +48,22 @@ fun ScanScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Инфо о текущем заказе
         if (article != null) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        "Текущий товар:",
-                        fontSize = TextSizeSmall,
-                        color = OnDarkSecondary
-                    )
-                    Text(
-                        "Артикул: $article",
-                        fontSize = TextSizeLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = OnDarkPrimary
-                    )
+                    Text("Текущий товар:", fontSize = TextSizeSmall, color = OnDarkSecondary)
+                    Text("Артикул: $article", fontSize = TextSizeLarge, fontWeight = FontWeight.Bold, color = OnDarkPrimary)
                     if (size != null) {
-                        Text(
-                            "Размер: $size",
-                            fontSize = TextSizeMedium,
-                            color = OnDarkSecondary
-                        )
+                        Text("Размер: $size", fontSize = TextSizeMedium, color = OnDarkSecondary)
                     }
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // Режимы
         Row(modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(
                 onClick = { scanMode = "barcode" },
@@ -104,7 +89,6 @@ fun ScanScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Поле ввода (для ручного ввода или сканера)
         OutlinedTextField(
             value = input,
             onValueChange = { input = it },
@@ -151,7 +135,6 @@ fun ScanScreen(
             )
         }
 
-        // Подсказка
         Spacer(modifier = Modifier.height(16.dp))
         Text(
             text = if (scanMode == "barcode")
