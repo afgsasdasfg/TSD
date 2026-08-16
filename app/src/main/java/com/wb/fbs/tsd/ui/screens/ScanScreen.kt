@@ -13,16 +13,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.wb.fbs.tsd.ui.theme.*
 
+
+
 @Composable
 fun ScanScreen(
     onBackClick: () -> Unit,
     onBarcodeScanned: (String) -> Unit,
     onSgtinScanned: (String) -> Unit,
+    onStickerScanned: (String) -> Unit,  // ← НОВЫЙ
     requiresSgtin: Boolean,
     article: String?,
     size: String?
 ) {
-    var scanMode by remember { mutableStateOf("barcode") }
+    var scanMode by remember { mutableStateOf("barcode") } // barcode | sgtin | sticker
     var input by remember { mutableStateOf("") }
 
     Column(
@@ -30,7 +33,7 @@ fun ScanScreen(
             .fillMaxSize()
             .background(DarkBackground)
             .padding(16.dp)
-    ) {
+    )  {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -85,6 +88,16 @@ fun ScanScreen(
             ) {
                 Text("КИЗ", color = if (scanMode == "sgtin") Color.White else OnDarkPrimary)
             }
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedButton(
+                onClick = { scanMode = "sticker" },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = if (scanMode == "sticker") WarningOrange else Color.Transparent
+                )
+            ) {
+                Text("Стикер WB", color = if (scanMode == "sticker") Color.White else OnDarkPrimary)
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -95,7 +108,12 @@ fun ScanScreen(
             modifier = Modifier.fillMaxWidth(),
             label = {
                 Text(
-                    if (scanMode == "barcode") "Штрихкод товара" else "Код КИЗ (Data Matrix)",
+                    when (scanMode) {
+                        "barcode" -> "Штрихкод товара"
+                        "sgtin" -> "Код КИЗ (Data Matrix)"
+                        "sticker" -> "Номер стикера WB (QR-код)"
+                        else -> "Введите код"
+                    },
                     color = OnDarkSecondary
                 )
             },
@@ -113,10 +131,10 @@ fun ScanScreen(
         Button(
             onClick = {
                 if (input.isNotBlank()) {
-                    if (scanMode == "barcode") {
-                        onBarcodeScanned(input)
-                    } else {
-                        onSgtinScanned(input)
+                    when (scanMode) {
+                        "barcode" -> onBarcodeScanned(input)
+                        "sgtin" -> onSgtinScanned(input)
+                        "sticker" -> onStickerScanned(input)
                     }
                     input = ""
                 }
@@ -129,7 +147,12 @@ fun ScanScreen(
             )
         ) {
             Text(
-                if (scanMode == "barcode") "✅ Подтвердить штрихкод" else "✅ Подтвердить КИЗ",
+                when (scanMode) {
+                    "barcode" -> "✅ Подтвердить штрихкод"
+                    "sgtin" -> "✅ Подтвердить КИЗ"
+                    "sticker" -> "✅ Подтвердить стикер"
+                    else -> "✅ Подтвердить"
+                },
                 fontSize = TextSizeLarge,
                 fontWeight = FontWeight.Bold
             )
@@ -137,10 +160,12 @@ fun ScanScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            text = if (scanMode == "barcode")
-                "💡 Отсканируйте штрихкод товара или введите вручную"
-            else
-                "💡 Отсканируйте Data Matrix код с маркировки Честный ЗНАК",
+            text = when (scanMode) {
+                "barcode" -> "💡 Отсканируйте штрихкод товара"
+                "sgtin" -> "💡 Отсканируйте Data Matrix с маркировки"
+                "sticker" -> "💡 Отсканируйте QR-код на стикере WB"
+                else -> ""
+            },
             fontSize = TextSizeSmall,
             color = OnDarkSecondary
         )

@@ -56,6 +56,15 @@ interface OrderDao {
     @Query("SELECT * FROM orders")
     fun getAllOrders(): Flow<List<OrderEntity>>
 
+    @Query("UPDATE orders SET scannedAt = :timestamp, isSynced = 0 WHERE id = :orderId")
+    suspend fun markOrderScanned(orderId: Long, timestamp: Long?)
+
+    @Query("SELECT id FROM orders")
+    fun getAllOrderIds(): Flow<List<Long>>
+
+    @Query("UPDATE orders SET status = :newStatus, isSynced = 0 WHERE id = :orderId")
+    suspend fun updateOrderStatus(orderId: Long, newStatus: String)
+
     @Delete
     suspend fun deleteOrder(order: OrderEntity)
 

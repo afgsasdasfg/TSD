@@ -6,6 +6,7 @@ import kotlinx.coroutines.delay
 import com.wb.fbs.tsd.data.db.*
 import com.wb.fbs.tsd.data.network.*
 import com.wb.fbs.tsd.utils.KizParser
+import com.wb.fbs.tsd.utils.WbStickerParser
 import kotlinx.coroutines.flow.Flow
 import java.text.SimpleDateFormat
 import java.util.*
@@ -40,39 +41,11 @@ class WbRepository(
 
     suspend fun getOrderById(orderId: Long): OrderEntity? = orderDao.getOrderById(orderId)
 
-    // ==================== SYNC: Загрузка новых заказов ====================
-
-    // Пример: syncNewOrders с retry
-    // WbRepository.kt — обновить syncNewOrders()
-
-    suspend fun syncNewOrders(): kotlin.Result<Int> = safeApiCall {
+        suspend fun syncNewOrders(): kotlin.Result<Int> = safeApiCall {
         requireApi().getNewOrders()
     }.map { response ->
         val serverOrders = response.orders?.map { it.toEntity() } ?: emptyList()
-        val serverOrderIds = serverOrders.map { it.id }.toSet()
-
-        // 1. Получаем локальные заказы
-        val localOrders = orderDao.getAllOrders().first()
-        val localOrderIds = localOrders.map { it.id }.toSet()
-
-        // 2. Добавляем новые заказы с сервера
         orderDao.insertOrders(serverOrders)
-
-        // 3. Удаляем заказы, которых больше нет на сервере
-        // (если они уже собраны и синхронизированы)
-        val toDelete = localOrders.filter {
-            it.id !in serverOrderIds && it.isSynced && it.status == "complete"
-        }
-        toDelete.forEach { orderDao.deleteOrder(it) }
-
-        // 4. Обновляем статусы существующих
-        serverOrders.forEach { serverOrder ->
-            val local = localOrders.find { it.id == serverOrder.id }
-            if (local != null && local.status != serverOrder.status) {
-                orderDao.updateOrder(local.copy(status = serverOrder.status))
-            }
-        }
-
         serverOrders.size
     }
 
@@ -181,8 +154,6 @@ class WbRepository(
             ScanResult.NotFound
         }
     }
-
-
     /**
      * Сканирование КИЗ — ищем заказ по GTIN/skuss
      */
@@ -274,6 +245,43 @@ class WbRepository(
     suspend fun getUnsyncedOrders(): List<OrderEntity> = orderDao.getUnsyncedOrders()
     suspend fun markOrderScanned(orderId: Long) {
         orderDao.markOrderScanned(orderId)
+    }
+    suspend fun unmarkOrderScanned(orderId: Long) {
+        orderDao.markOrderScanned(orderId, null)
+    }
+
+    // ЗАМЕНИТЬ syncOrderStatuses на это:
+
+    suspend fun syncOrderStatuses() {
+        try {
+            val localIds = orderDao.getAllOrderIds().first().take(100)
+            if (localIds.isEmpty()) return
+
+            val response = requireApi().getOrdersStatus(WbStatusRequest(localIds))
+            val ordersList = response.orders
+            if (ordersList != null) {
+                for (dto in ordersList) {
+                    orderDao.updateOrderStatus(dto.id, dto.supplierStatus)
+                }
+            }
+        } catch (e: Exception) {
+            // Не критично
+        }
+    }
+
+    suspend fun scanWbSticker(stickerData: String): ScanResult {
+        val orderId = stickerData.filter { it.isDigit() }.takeIf { it.length >= 5 }?.toLongOrNull()
+            ?: return ScanResult.Error("Неверный формат стикера")
+
+        val order = orderDao.getOrderById(orderId)
+            ?: return ScanResult.NotFound
+
+        return if (order.status == "cancel") {
+            ScanResult.Error("Заказ отменён")
+        } else {
+            orderDao.markOrderScanned(order.id, System.currentTimeMillis())
+            ScanResult.Success(order)
+        }
     }
     private suspend fun <T> safeApiCall(
         maxRetries: Int = 3,
@@ -367,4 +375,5 @@ sealed class ApiException(message: String) : Exception(message) {
     class HttpError(val code: Int, message: String) : ApiException("HTTP $code: $message")
     class Timeout(message: String) : ApiException(message)
     class NoInternet(message: String) : ApiException(message)
+
 }

@@ -205,14 +205,8 @@ private fun SkuGroupCard(
 
                     Checkbox(
                         checked = isOrderScanned,
-                        onCheckedChange = { checked ->
-                            android.util.Log.d("PICKING", "Checkbox changed: $checked, hasKiz=$hasKiz, kizDone=$kizDone")
-                            if (checked && hasKiz && !kizDone) {
-                                android.util.Log.d("PICKING", "Opening KIZ scanner for order ${order.id}")
-                                onScanKizForOrder(order.id)
-                            } else {
-                                onOrderClick(order)
-                            }
+                        onCheckedChange = {
+                            onOrderClick(order)
                         }
                     )
                 }

@@ -150,7 +150,10 @@ fun TsdApp() {
                 }
                 HomeScreen(
                     onNavigate = { route -> navController.navigate(route) },
-                    onSyncClick = { viewModel.loadOrders() },
+                    // В HomeScreen или при pull-to-refresh:
+                    onSyncClick = {
+                        viewModel.loadOrders()
+                        viewModel.syncOrderStatuses()},
                     lastSyncTime = uiState.lastSyncTime,  // ← ПЕРЕДАЁМ ВРЕМЯ
                     isLoading = uiState.isLoading
                 )
@@ -235,7 +238,11 @@ fun TsdApp() {
                     orders = orders,
                     onBackClick = { navController.popBackStack() },
                     onOrderClick = { order ->
-                        viewModel.markOrderScanned(order.id)
+                        if (order.scannedAt != null) {
+                            viewModel.unmarkOrderScanned(order.id)
+                        } else {
+                            viewModel.markOrderScanned(order.id)
+                        }
                     },
                     onScanKizForOrder = { orderId ->
                         navController.navigate("scan_kiz/$orderId")

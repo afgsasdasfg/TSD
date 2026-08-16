@@ -12,9 +12,6 @@ import com.wb.fbs.tsd.data.repository.ScanResult
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-// ← СНАЧАЛА data class и sealed class
-// ui/viewmodel/OrdersViewModel.kt — обновить OrdersUiState
-
 data class OrdersUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
@@ -79,7 +76,46 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
         }
     }
     // Добавить в OrdersViewModel
+    // ui/viewmodel/OrdersViewModel.kt — добавить
+    // ВСТАВИТЬ в класс OrdersViewModel (рядом с markOrderScanned):
 
+    fun unmarkOrderScanned(orderId: Long) {
+        viewModelScope.launch {
+            repository.unmarkOrderScanned(orderId)
+        }
+    }
+
+    fun syncOrderStatuses() {
+        viewModelScope.launch {
+            repository.syncOrderStatuses()
+        }
+    }
+
+    fun scanWbSticker(stickerData: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(scanResult = null) }
+            when (val result = repository.scanWbSticker(stickerData)) {
+                is ScanResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            scanResult = ScanUiResult.Success(
+                                orderId = result.order.id,
+                                article = result.order.article,
+                                size = result.order.size,
+                                requiresSgtin = result.order.isMarked
+                            )
+                        )
+                    }
+                }
+                is ScanResult.NotFound -> {
+                    _uiState.update { it.copy(scanResult = ScanUiResult.NotFound) }
+                }
+                is ScanResult.Error -> {
+                    _uiState.update { it.copy(scanResult = ScanUiResult.Error(result.message)) }
+                }
+            }
+        }
+    }
     /**
      * Синхронизация несинхронизированных заказов (при восстановлении интернета)
      */

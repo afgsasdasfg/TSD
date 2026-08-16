@@ -121,11 +121,6 @@ interface WbApiService {
     @GET("/api/v3/orders/new")
     suspend fun getNewOrders(): Response<WbNewOrdersResponse>
 
-    @POST("/api/v3/orders/status")
-    suspend fun getOrdersStatus(
-        @Body request: WbStatusRequest
-    ): Response<WbStatusResponse>
-
     @POST("/api/v3/orders/stickers")
     suspend fun getStickers(
         @Query("type") type: String = "svg",
@@ -191,6 +186,9 @@ interface WbApiService {
         @Path("supplyId") supplyId: String,
         @Query("type") type: String = "svg"
     ): Response<WbBarcodeResponse>
+
+    @POST("/api/v3/orders/status")
+    suspend fun getOrdersStatus(@Body request: WbStatusRequest): Response<WbStatusResponse>
 
     @GET("/api/marketplace/v3/supplies/{supplyId}/order-ids")
     suspend fun getSupplyOrderIds(
