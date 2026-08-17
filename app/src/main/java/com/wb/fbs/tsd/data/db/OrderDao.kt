@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface OrderDao {
-    @Query("SELECT * FROM orders WHERE status = 'new' ORDER BY createdAt DESC")
+    @Query("SELECT * FROM orders WHERE status IN ('new', 'confirm') ORDER BY createdAt DESC")
     fun getNewOrders(): Flow<List<OrderEntity>>
 
     @Query("SELECT * FROM orders WHERE supplyId = :supplyId ORDER BY article, size")
@@ -14,10 +14,10 @@ interface OrderDao {
     @Query("SELECT * FROM orders WHERE id = :orderId")
     suspend fun getOrderById(orderId: Long): OrderEntity?
 
-    @Query("SELECT * FROM orders WHERE article = :article AND size = :size AND status = 'new'")
+    @Query("SELECT * FROM orders WHERE article = :article AND size = :size AND status IN ('new', 'confirm')")
     suspend fun getOrdersByArticleSize(article: String, size: String?): List<OrderEntity>
 
-    @Query("SELECT COUNT(*) FROM orders WHERE status = 'new'")
+    @Query("SELECT COUNT(*) FROM orders WHERE status IN ('new', 'confirm')")
     fun getNewOrdersCount(): Flow<Int>
 
     @Query("SELECT COUNT(*) FROM orders WHERE supplyId = :supplyId")

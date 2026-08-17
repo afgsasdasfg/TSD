@@ -143,11 +143,23 @@ private fun SkuGroupCard(
                         fontWeight = FontWeight.Bold,
                         color = OnDarkPrimary
                     )
-                    Text(
-                        text = "Баркод: $barcode",
-                        fontSize = TextSizeSmall,
-                        color = OnDarkDisabled
-                    )
+                    val size = orders.firstOrNull()?.size
+                    if (!size.isNullOrBlank()) {
+                        Text(
+                            text = "Размер: $size",
+                            fontSize = TextSizeMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = OnDarkPrimary
+                        )
+                    }
+                    val color = orders.firstOrNull()?.color
+                    if (!color.isNullOrBlank()) {
+                        Text(
+                            text = "Цвет: $color",
+                            fontSize = TextSizeSmall,
+                            color = OnDarkSecondary
+                        )
+                    }
                     Text(
                         text = "Количество: $total шт",
                         fontSize = TextSizeMedium,
@@ -189,8 +201,10 @@ private fun SkuGroupCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
+                        val orderSize = order.size?.let { " | $it" } ?: ""
+                        val orderColor = order.color?.let { " | $it" } ?: ""
                         Text(
-                            text = "${index + 1}. Заказ ${order.id}",
+                            text = "${index + 1}. Заказ #${order.id}$orderSize$orderColor",
                             fontSize = TextSizeSmall,
                             color = OnDarkSecondary
                         )

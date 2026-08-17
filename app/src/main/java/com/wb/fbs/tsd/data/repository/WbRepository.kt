@@ -46,6 +46,10 @@ class WbRepository(
     }.map { response ->
         val serverOrders = response.orders?.map { it.toEntity() } ?: emptyList()
         orderDao.insertOrders(serverOrders)
+        // Сразу подтягиваем актуальные статусы (new/confirm/complete)
+        if (serverOrders.isNotEmpty()) {
+            syncOrderStatuses()
+        }
         serverOrders.size
     }
 
@@ -210,7 +214,7 @@ class WbRepository(
             article = article ?: "",
             nmId = nmId ?: 0,
             chrtId = chrtId ?: 0,
-            name = "", // TODO: получать из карточки товара отдельным запросом
+            name = "", // Название подтягивается из карточки товара (nmId)
             color = colorCode,
             size = size,
             barcode = skus?.firstOrNull(),
@@ -225,8 +229,8 @@ class WbRepository(
             comment = comment,
             createdAt = parseDate(createdAt),
             supplyId = supplyId,
-            status = "new",
-            isMarked = (requiredMeta?.joinToString(",") ?: "").contains("sgtin") || (optionalMeta?.joinToString(",") ?: "").contains("sgtin"),// || true,
+            status = "new", // Статус обновляется через syncOrderStatuses()
+            isMarked = (requiredMeta?.joinToString(",") ?: "").contains("sgtin") || (optionalMeta?.joinToString(",") ?: "").contains("sgtin"),
             sgtin = null,
             isSynced = true,
             scannedAt = null,
@@ -352,9 +356,6 @@ class WbRepository(
         class Timeout(message: String) : ApiException(message)
         class NoInternet(message: String) : ApiException(message)
     }
-
-
-
 }
 
 sealed class ScanResult {
@@ -366,14 +367,4 @@ sealed class KizScanResult {
     data class Success(val order: OrderEntity, val sgtin: String) : KizScanResult()
     data class OrderNotFound(val gtin: String) : KizScanResult()
     object InvalidFormat : KizScanResult()
-}
-// Sealed class для типизации ошибок
-sealed class ApiException(message: String) : Exception(message) {
-    class Unauthorized(message: String) : ApiException(message)
-    class RateLimit(message: String) : ApiException(message)
-    class ServerError(message: String) : ApiException(message)
-    class HttpError(val code: Int, message: String) : ApiException("HTTP $code: $message")
-    class Timeout(message: String) : ApiException(message)
-    class NoInternet(message: String) : ApiException(message)
-
 }
