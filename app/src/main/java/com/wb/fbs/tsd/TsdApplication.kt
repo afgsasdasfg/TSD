@@ -21,7 +21,12 @@ class TsdApplication : Application() {
             applicationContext,
             AppDatabase::class.java,
             "tsd_database"
-        ).build()
+        )
+            // MVP: схема поменялась (добавлены поля стикера в orders), полноценную
+            // миграцию писать некогда — при апгрейде локальная база один раз очистится
+            // и перезальётся с сервера через syncAllOrders()/syncNewOrders().
+            .fallbackToDestructiveMigration()
+            .build()
 
         repository = WbRepository(
             orderDao = database.orderDao(),

@@ -208,6 +208,10 @@ fun TsdApp() {
                     onSgtinScanned = { sgtin ->
                         navController.popBackStack()
                     },
+                    onStickerScanned = { stickerData ->
+                        viewModel.scanWbSticker(stickerData)
+                        navController.popBackStack()
+                    },
                     requiresSgtin = false,
                     article = null,
                     size = null

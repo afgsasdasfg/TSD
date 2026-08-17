@@ -12,7 +12,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ScanLogEntity::class,
         SettingsEntity::class
     ],
-    version = 1,
+    version = 2, // v2: добавлены stickerBarcode/stickerPartA/stickerPartB в OrderEntity
     exportSchema = false
 )
 @TypeConverters(Converters::class)

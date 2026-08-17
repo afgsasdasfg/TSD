@@ -34,6 +34,12 @@ data class OrderEntity(
     val isSynced: Boolean,     // Синхронизировано с WB
     val scannedAt: Long?,      // Когда отсканирован на ТСД
     val stickerPrinted: Boolean,// Стикер распечатан
+    // Код со стикера заказа (WbStickerDto из POST /api/v3/orders/stickers).
+    // Уникален на конкретный заказ — в отличие от barcode товара, который
+    // может повторяться у одного и того же товара на разных кабинетах.
+    val stickerBarcode: String? = null, // то, что реально сканируется со стикера
+    val stickerPartA: String? = null,   // цифры под баркодом (часть A)
+    val stickerPartB: String? = null,   // цифры под баркодом (часть B)
     val updatedAt: Long = System.currentTimeMillis()
 )
 

@@ -12,6 +12,9 @@ import com.wb.fbs.tsd.data.repository.ScanResult
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
+// ← СНАЧАЛА data class и sealed class
+// ui/viewmodel/OrdersViewModel.kt — обновить OrdersUiState
+
 data class OrdersUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
@@ -39,7 +42,9 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
     private val _uiState = MutableStateFlow(OrdersUiState())
     val uiState: StateFlow<OrdersUiState> = _uiState.asStateFlow()
 
-    val newOrders: StateFlow<List<OrderEntity>> = repository.getNewOrders()
+    // Название сохранено для совместимости с MainActivity, но теперь это
+    // new + confirm ("на сборке") — то, с чем реально идёт работа на сборке.
+    val newOrders: StateFlow<List<OrderEntity>> = repository.getActiveOrders()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
@@ -52,7 +57,7 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
     fun loadOrders() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            repository.syncNewOrders()
+            repository.syncAllOrders()
                 .onSuccess { count ->
                     _uiState.update {
                         it.copy(
@@ -76,46 +81,7 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
         }
     }
     // Добавить в OrdersViewModel
-    // ui/viewmodel/OrdersViewModel.kt — добавить
-    // ВСТАВИТЬ в класс OrdersViewModel (рядом с markOrderScanned):
 
-    fun unmarkOrderScanned(orderId: Long) {
-        viewModelScope.launch {
-            repository.unmarkOrderScanned(orderId)
-        }
-    }
-
-    fun syncOrderStatuses() {
-        viewModelScope.launch {
-            repository.syncOrderStatuses()
-        }
-    }
-
-    fun scanWbSticker(stickerData: String) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(scanResult = null) }
-            when (val result = repository.scanWbSticker(stickerData)) {
-                is ScanResult.Success -> {
-                    _uiState.update {
-                        it.copy(
-                            scanResult = ScanUiResult.Success(
-                                orderId = result.order.id,
-                                article = result.order.article,
-                                size = result.order.size,
-                                requiresSgtin = result.order.isMarked
-                            )
-                        )
-                    }
-                }
-                is ScanResult.NotFound -> {
-                    _uiState.update { it.copy(scanResult = ScanUiResult.NotFound) }
-                }
-                is ScanResult.Error -> {
-                    _uiState.update { it.copy(scanResult = ScanUiResult.Error(result.message)) }
-                }
-            }
-        }
-    }
     /**
      * Синхронизация несинхронизированных заказов (при восстановлении интернета)
      */

@@ -6,7 +6,6 @@ import kotlinx.coroutines.delay
 import com.wb.fbs.tsd.data.db.*
 import com.wb.fbs.tsd.data.network.*
 import com.wb.fbs.tsd.utils.KizParser
-import com.wb.fbs.tsd.utils.WbStickerParser
 import kotlinx.coroutines.flow.Flow
 import java.text.SimpleDateFormat
 import java.util.*
@@ -36,17 +35,101 @@ class WbRepository(
 
     fun getNewOrders(): Flow<List<OrderEntity>> = orderDao.getNewOrders()
 
+    // Заказы в реальной работе продавца: new (новые) + confirm (уже "на сборке" в кабинете WB)
+    fun getActiveOrders(): Flow<List<OrderEntity>> = orderDao.getActiveOrders()
+
     fun getOrdersBySupply(supplyId: String): Flow<List<OrderEntity>> =
         orderDao.getOrdersBySupply(supplyId)
 
     suspend fun getOrderById(orderId: Long): OrderEntity? = orderDao.getOrderById(orderId)
 
-        suspend fun syncNewOrders(): kotlin.Result<Int> = safeApiCall {
+    // ==================== SYNC: Загрузка новых заказов ====================
+
+    // Пример: syncNewOrders с retry
+    // WbRepository.kt — обновить syncNewOrders()
+
+    suspend fun syncNewOrders(): kotlin.Result<Int> = safeApiCall {
         requireApi().getNewOrders()
     }.map { response ->
         val serverOrders = response.orders?.map { it.toEntity() } ?: emptyList()
+        val serverOrderIds = serverOrders.map { it.id }.toSet()
+
+        // 1. Получаем локальные заказы
+        val localOrders = orderDao.getAllOrders().first()
+        val localOrderIds = localOrders.map { it.id }.toSet()
+
+        // 2. Добавляем новые заказы с сервера
         orderDao.insertOrders(serverOrders)
+
+        // 3. Удаляем заказы, которых больше нет на сервере
+        // (если они уже собраны и синхронизированы)
+        val toDelete = localOrders.filter {
+            it.id !in serverOrderIds && it.isSynced && it.status == "complete"
+        }
+        toDelete.forEach { orderDao.deleteOrder(it) }
+
+        // 4. Обновляем статусы существующих
+        serverOrders.forEach { serverOrder ->
+            val local = localOrders.find { it.id == serverOrder.id }
+            if (local != null && local.status != serverOrder.status) {
+                orderDao.updateOrder(local.copy(status = serverOrder.status))
+            }
+        }
+
         serverOrders.size
+    }
+
+    /**
+     * Синхронизация ВСЕХ сборочных заданий за период (не только "новых") —
+     * т.е. включая те, что уже "на сборке" (confirm) в кабинете WB.
+     * GET /api/v3/orders не отдаёт текущий статус, поэтому статусы
+     * доуточняются отдельно через syncStatuses() пачками.
+     *
+     * dateFromEpochSeconds — Unix timestamp начала периода, UTC.
+     * По умолчанию (null) WB сам берёт последние 30 дней.
+     */
+    suspend fun syncAllOrders(dateFromEpochSeconds: Long? = null): kotlin.Result<Int> {
+        val allDtos = mutableListOf<WbOrderDto>()
+        var next = 0L
+
+        while (true) {
+            val pageResult = safeApiCall {
+                requireApi().getOrders(limit = 1000, next = next, dateFrom = dateFromEpochSeconds)
+            }
+            val page = pageResult.getOrNull()
+                ?: return kotlin.Result.failure(
+                    pageResult.exceptionOrNull() ?: Exception("Unknown error")
+                )
+
+            allDtos += page.orders
+            val nextVal = page.next
+            if (nextVal == null || nextVal == 0L || page.orders.isEmpty() || nextVal == next) break
+            next = nextVal
+        }
+
+        // Апсертим без потери локального прогресса: если заказ уже есть локально
+        // (например, уже отсканирован офлайн), не затираем sgtin/scannedAt/stickerPrinted —
+        // обновляем только серверные поля.
+        val localOrders = orderDao.getAllOrders().first().associateBy { it.id }
+        val toUpsert = allDtos.map { dto ->
+            val existing = localOrders[dto.id]
+            if (existing != null) {
+                existing.copy(
+                    supplyId = dto.supplyId ?: existing.supplyId,
+                    updatedAt = System.currentTimeMillis()
+                )
+            } else {
+                dto.toEntity()
+            }
+        }
+        orderDao.insertOrders(toUpsert)
+
+        // Доуточняем реальный статус (new/confirm/complete/cancel) — пачками не больше 1000
+        allDtos.map { it.id }.chunked(1000).forEach { chunk ->
+            syncStatuses(chunk)
+        }
+
+        return kotlin.Result.success(allDtos.size)
     }
 
     suspend fun createSupply(name: String): kotlin.Result<String> = safeApiCall {
@@ -78,6 +161,12 @@ class WbRepository(
         requireApi().addOrdersToSupply(supplyId, WbAddOrdersToSupplyRequest(orderIds))
     }.map {
         orderDao.addOrdersToSupply(orderIds, supplyId)
+        // Стикеры доступны у WB сразу как заказ переходит в confirm — подтягиваем,
+        // чтобы дальше можно было сканировать сборку по стикеру, а не по ШК товара.
+        // Не критично для основного флоу — если не получится, просто не блокируем.
+        orderIds.chunked(100).forEach { chunk ->
+            downloadStickers(chunk)
+        }
     }
 
     suspend fun deliverSupply(supplyId: String): kotlin.Result<Unit> = safeApiCall {
@@ -101,7 +190,18 @@ class WbRepository(
             request = WbStickerRequest(orderIds)
         )
     }.map { response ->
-        response.stickers ?: emptyList()
+        val stickers = response.stickers ?: emptyList()
+        // Сохраняем код стикера локально — по нему потом матчим скан на сборке,
+        // это решает проблему одинакового штрихкода товара на разных кабинетах.
+        stickers.forEach { sticker ->
+            orderDao.updateOrderSticker(
+                orderId = sticker.orderId,
+                partA = sticker.partA,
+                partB = sticker.partB,
+                barcode = sticker.barcode
+            )
+        }
+        stickers
     }
 
     suspend fun syncStatuses(orderIds: List<Long>): kotlin.Result<Unit> = safeApiCall {
@@ -115,17 +215,28 @@ class WbRepository(
 
     // ==================== OFFLINE: Сканирование ====================
     suspend fun scanBarcode(barcode: String): ScanResult {
-        val allOrders: List<OrderEntity> = orderDao.getNewOrders().first()
+        val allOrders: List<OrderEntity> = orderDao.getActiveOrders().first()
 
-        // 1. Точное совпадение по barcode
-        val exactMatch = allOrders.find { it.barcode == barcode }
-        // 2. Частичное совпадение (если штрихкод сканером считался не полностью)
-            ?: allOrders.find {
-                it.barcode != null && (
-                        it.barcode.contains(barcode) ||
-                                barcode.contains(it.barcode)
-                        )
-            }
+        // 1. Приоритет — код со стикера заказа (уникален на заказ, не зависит от того,
+        //    что один и тот же товар может продаваться с нескольких кабинетов WB —
+        //    в отличие от штрихкода товара, который в этом случае неоднозначен).
+        //    Не знаем точно, что физически прочитает сканер (QR или Code128 снизу),
+        //    поэтому проверяем все три поля стикера.
+        val stickerMatch = allOrders.find {
+            it.stickerBarcode == barcode || it.stickerPartA == barcode || it.stickerPartB == barcode
+        }
+
+        // 2. Фолбэк — точное совпадение по штрихкоду товара
+        val barcodeMatch = allOrders.find { it.barcode == barcode }
+        // 3. Частичное совпадение (если штрихкод сканером считался не полностью)
+        val partialMatch = allOrders.find {
+            it.barcode != null && (
+                    it.barcode.contains(barcode) ||
+                            barcode.contains(it.barcode)
+                    )
+        }
+
+        val exactMatch = stickerMatch ?: barcodeMatch ?: partialMatch
 
         return if (exactMatch != null) {
             orderDao.markOrderScanned(exactMatch.id)
@@ -154,6 +265,8 @@ class WbRepository(
             ScanResult.NotFound
         }
     }
+
+
     /**
      * Сканирование КИЗ — ищем заказ по GTIN/skuss
      */
@@ -161,7 +274,7 @@ class WbRepository(
         val gtin = KizParser.extractGtin(kizString) ?: return KizScanResult.InvalidFormat
 
         // Получаем список заказов из Flow
-        val allOrders: List<OrderEntity> = orderDao.getNewOrders().first()
+        val allOrders: List<OrderEntity> = orderDao.getActiveOrders().first()
 
         val match: OrderEntity? = allOrders.find { order: OrderEntity ->
             val barcode = order.barcode
@@ -246,43 +359,6 @@ class WbRepository(
     suspend fun markOrderScanned(orderId: Long) {
         orderDao.markOrderScanned(orderId)
     }
-    suspend fun unmarkOrderScanned(orderId: Long) {
-        orderDao.markOrderScanned(orderId, null)
-    }
-
-    // ЗАМЕНИТЬ syncOrderStatuses на это:
-
-    suspend fun syncOrderStatuses() {
-        try {
-            val localIds = orderDao.getAllOrderIds().first().take(100)
-            if (localIds.isEmpty()) return
-
-            val response = requireApi().getOrdersStatus(WbStatusRequest(localIds))
-            val ordersList = response.orders
-            if (ordersList != null) {
-                for (dto in ordersList) {
-                    orderDao.updateOrderStatus(dto.id, dto.supplierStatus)
-                }
-            }
-        } catch (e: Exception) {
-            // Не критично
-        }
-    }
-
-    suspend fun scanWbSticker(stickerData: String): ScanResult {
-        val orderId = stickerData.filter { it.isDigit() }.takeIf { it.length >= 5 }?.toLongOrNull()
-            ?: return ScanResult.Error("Неверный формат стикера")
-
-        val order = orderDao.getOrderById(orderId)
-            ?: return ScanResult.NotFound
-
-        return if (order.status == "cancel") {
-            ScanResult.Error("Заказ отменён")
-        } else {
-            orderDao.markOrderScanned(order.id, System.currentTimeMillis())
-            ScanResult.Success(order)
-        }
-    }
     private suspend fun <T> safeApiCall(
         maxRetries: Int = 3,
         block: suspend () -> retrofit2.Response<T>
@@ -343,18 +419,6 @@ class WbRepository(
         return kotlin.Result.failure(lastException ?: Exception("Unknown error"))
     }
 
-    // Sealed class для ошибок
-    sealed class ApiException(message: String) : Exception(message) {
-        class Unauthorized(message: String) : ApiException(message)
-        class RateLimit(message: String) : ApiException(message)
-        class ServerError(message: String) : ApiException(message)
-        class HttpError(val code: Int, message: String) : ApiException("HTTP $code: $message")
-        class Timeout(message: String) : ApiException(message)
-        class NoInternet(message: String) : ApiException(message)
-    }
-
-
-
 }
 
 sealed class ScanResult {
@@ -375,5 +439,4 @@ sealed class ApiException(message: String) : Exception(message) {
     class HttpError(val code: Int, message: String) : ApiException("HTTP $code: $message")
     class Timeout(message: String) : ApiException(message)
     class NoInternet(message: String) : ApiException(message)
-
 }

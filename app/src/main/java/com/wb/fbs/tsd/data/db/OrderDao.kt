@@ -8,6 +8,14 @@ interface OrderDao {
     @Query("SELECT * FROM orders WHERE status = 'new' ORDER BY createdAt DESC")
     fun getNewOrders(): Flow<List<OrderEntity>>
 
+    // Заказы, с которыми реально идёт физическая работа на сборке:
+    // new — ещё не подтверждён, confirm — уже в сборочном задании ("на сборке" в кабинете WB)
+    @Query("SELECT * FROM orders WHERE status IN ('new', 'confirm') ORDER BY createdAt DESC")
+    fun getActiveOrders(): Flow<List<OrderEntity>>
+
+    @Query("SELECT COUNT(*) FROM orders WHERE status = 'confirm'")
+    fun getConfirmOrdersCount(): Flow<Int>
+
     @Query("SELECT * FROM orders WHERE supplyId = :supplyId ORDER BY article, size")
     fun getOrdersBySupply(supplyId: String): Flow<List<OrderEntity>>
 
@@ -44,6 +52,20 @@ interface OrderDao {
     @Query("UPDATE orders SET stickerPrinted = 1, isSynced = 0 WHERE id = :orderId")
     suspend fun markStickerPrinted(orderId: Long)
 
+    @Query("""
+        UPDATE orders 
+        SET stickerBarcode = :barcode, stickerPartA = :partA, stickerPartB = :partB 
+        WHERE id = :orderId
+    """)
+    suspend fun updateOrderSticker(orderId: Long, partA: String, partB: String, barcode: String)
+
+    @Query("""
+        SELECT * FROM orders 
+        WHERE stickerBarcode = :code OR stickerPartA = :code OR stickerPartB = :code 
+        LIMIT 1
+    """)
+    suspend fun findOrderByStickerCode(code: String): OrderEntity?
+
     @Query("DELETE FROM orders WHERE status = 'cancel' AND createdAt < :olderThan")
     suspend fun deleteOldCancelledOrders(olderThan: Long)
 
@@ -55,15 +77,6 @@ interface OrderDao {
 
     @Query("SELECT * FROM orders")
     fun getAllOrders(): Flow<List<OrderEntity>>
-
-    @Query("UPDATE orders SET scannedAt = :timestamp, isSynced = 0 WHERE id = :orderId")
-    suspend fun markOrderScanned(orderId: Long, timestamp: Long?)
-
-    @Query("SELECT id FROM orders")
-    fun getAllOrderIds(): Flow<List<Long>>
-
-    @Query("UPDATE orders SET status = :newStatus, isSynced = 0 WHERE id = :orderId")
-    suspend fun updateOrderStatus(orderId: Long, newStatus: String)
 
     @Delete
     suspend fun deleteOrder(order: OrderEntity)
