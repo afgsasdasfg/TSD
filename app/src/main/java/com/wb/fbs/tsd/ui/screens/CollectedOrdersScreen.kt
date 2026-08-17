@@ -157,13 +157,28 @@ private fun CollectedOrderCard(
                     fontWeight = FontWeight.Bold,
                     color = OnDarkPrimary
                 )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (!order.size.isNullOrBlank()) {
+                        Text(
+                            text = order.size,
+                            fontSize = TextSizeMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = OnDarkPrimary
+                        )
+                    }
+                    if (!order.color.isNullOrBlank()) {
+                        Text(
+                            text = order.color,
+                            fontSize = TextSizeSmall,
+                            color = OnDarkSecondary
+                        )
+                    }
+                }
                 Text(
                     text = "Заказ #${order.id}",
-                    fontSize = TextSizeSmall,
-                    color = OnDarkSecondary
-                )
-                Text(
-                    text = "Штрихкод: ${order.barcode ?: "—"}",
                     fontSize = TextSizeSmall,
                     color = OnDarkDisabled
                 )

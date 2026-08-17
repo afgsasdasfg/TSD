@@ -188,13 +188,28 @@ private fun OrderCard(order: OrderEntity, onClick: () -> Unit) {
                         fontWeight = FontWeight.Bold,
                         color = OnDarkPrimary
                     )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (!order.size.isNullOrBlank()) {
+                            Text(
+                                text = "Размер: ${order.size}",
+                                fontSize = TextSizeMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = OnDarkPrimary
+                            )
+                        }
+                        if (!order.color.isNullOrBlank()) {
+                            Text(
+                                text = "Цвет: ${order.color}",
+                                fontSize = TextSizeSmall,
+                                color = OnDarkSecondary
+                            )
+                        }
+                    }
                     Text(
-                        text = "Штрихкод: ${order.barcode ?: "—"}",
-                        fontSize = TextSizeMedium,
-                        color = OnDarkSecondary
-                    )
-                    Text(
-                        text = "nmId: ${order.nmId}",
+                        text = "Заказ #${order.id}",
                         fontSize = TextSizeSmall,
                         color = OnDarkDisabled
                     )

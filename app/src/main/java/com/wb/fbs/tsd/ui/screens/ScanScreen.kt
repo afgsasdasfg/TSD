@@ -25,7 +25,7 @@ fun ScanScreen(
     article: String?,
     size: String?
 ) {
-    var scanMode by remember { mutableStateOf("barcode") } // barcode | sgtin | sticker
+    var scanMode by remember { mutableStateOf("sticker") } // sticker | barcode | sgtin
     var input by remember { mutableStateOf("") }
 
     Column(
@@ -42,7 +42,12 @@ fun ScanScreen(
                 Icon(Icons.Default.ArrowBack, "Назад", tint = OnDarkPrimary)
             }
             Text(
-                text = if (scanMode == "barcode") "🔍 Сканирование товара" else "🏷️ Сканирование КИЗ",
+                text = when (scanMode) {
+                    "sticker" -> "📋 Сканирование стикера WB"
+                    "barcode" -> "🔍 Сканирование товара"
+                    "sgtin" -> "🏷️ Сканирование КИЗ"
+                    else -> "Сканирование"
+                },
                 fontSize = TextSizeExtraLarge,
                 fontWeight = FontWeight.Bold,
                 color = OnDarkPrimary
@@ -119,7 +124,11 @@ fun ScanScreen(
             },
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = if (scanMode == "barcode") InfoBlue else PrimaryGreen,
+                focusedBorderColor = when (scanMode) {
+                    "sticker" -> WarningOrange
+                    "barcode" -> InfoBlue
+                    else -> PrimaryGreen
+                },
                 unfocusedBorderColor = OnDarkDisabled,
                 focusedTextColor = OnDarkPrimary,
                 unfocusedTextColor = OnDarkPrimary
@@ -143,7 +152,11 @@ fun ScanScreen(
                 .fillMaxWidth()
                 .height(ButtonHeightLarge),
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (scanMode == "barcode") InfoBlue else PrimaryGreen
+                containerColor = when (scanMode) {
+                    "sticker" -> WarningOrange
+                    "barcode" -> InfoBlue
+                    else -> PrimaryGreen
+                }
             )
         ) {
             Text(

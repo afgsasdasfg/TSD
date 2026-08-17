@@ -83,8 +83,10 @@ fun HomeScreen(
         }
 
         val buttons = listOf(
+            listOf("📋", "Заказы FBS", "#2196F3", "orders"),
             listOf("🚚", "Сборка заказов", "#9C27B0", "picking"),
-            listOf("📦", "Собранные заказы", "#FF9800", "collected")
+            listOf("📦", "Собранные заказы", "#FF9800", "collected"),
+            listOf("📋", "Сканирование", "#4CAF50", "scan")
         )
 
         for (button in buttons) {
@@ -115,7 +117,7 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            "Маркировка доступна после сборки заказа",
+            "Сканируйте стикер WB для привязки КИЗ к заказу",
             fontSize = TextSizeSmall,
             color = OnDarkSecondary
         )
