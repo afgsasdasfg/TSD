@@ -39,7 +39,7 @@ interface OrderDao {
     suspend fun setOrderSgtin(orderId: Long, sgtin: String)
 
     @Query("UPDATE orders SET scannedAt = :timestamp, isSynced = 0 WHERE id = :orderId")
-    suspend fun markOrderScanned(orderId: Long, timestamp: Long = System.currentTimeMillis())
+    suspend fun markOrderScanned(orderId: Long, timestamp: Long?)
 
     @Query("UPDATE orders SET stickerPrinted = 1, isSynced = 0 WHERE id = :orderId")
     suspend fun markStickerPrinted(orderId: Long)
@@ -55,9 +55,6 @@ interface OrderDao {
 
     @Query("SELECT * FROM orders")
     fun getAllOrders(): Flow<List<OrderEntity>>
-
-    @Query("UPDATE orders SET scannedAt = :timestamp, isSynced = 0 WHERE id = :orderId")
-    suspend fun markOrderScanned(orderId: Long, timestamp: Long?)
 
     @Query("SELECT id FROM orders")
     fun getAllOrderIds(): Flow<List<Long>>

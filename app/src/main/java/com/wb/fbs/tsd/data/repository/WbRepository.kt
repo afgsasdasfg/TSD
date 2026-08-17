@@ -132,7 +132,7 @@ class WbRepository(
             }
 
         return if (exactMatch != null) {
-            orderDao.markOrderScanned(exactMatch.id)
+            orderDao.markOrderScanned(exactMatch.id, System.currentTimeMillis())
             scanLogDao.insert(
                 ScanLogEntity(
                     orderId = exactMatch.id,
@@ -248,7 +248,7 @@ class WbRepository(
     }
     suspend fun getUnsyncedOrders(): List<OrderEntity> = orderDao.getUnsyncedOrders()
     suspend fun markOrderScanned(orderId: Long) {
-        orderDao.markOrderScanned(orderId)
+        orderDao.markOrderScanned(orderId, System.currentTimeMillis())
     }
     suspend fun unmarkOrderScanned(orderId: Long) {
         orderDao.markOrderScanned(orderId, null)

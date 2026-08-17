@@ -320,6 +320,8 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
             }
         }
     }
+}
+
 sealed class KizValidationUiResult {
     data class Valid(
         val gtin: String,
