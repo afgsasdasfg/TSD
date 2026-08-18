@@ -12,14 +12,11 @@ import com.wb.fbs.tsd.data.repository.ScanResult
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-// ← СНАЧАЛА data class и sealed class
-// ui/viewmodel/OrdersViewModel.kt — обновить OrdersUiState
-
 data class OrdersUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val lastSyncCount: Int = 0,
-    val lastSyncTime: Long = 0,  // ← НОВОЕ: timestamp последней синхронизации
+    val lastSyncTime: Long = 0,
     val scanResult: ScanUiResult? = null,
     val sgtinSaved: Boolean = false,
     val createdSupplyId: String? = null,
@@ -42,9 +39,7 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
     private val _uiState = MutableStateFlow(OrdersUiState())
     val uiState: StateFlow<OrdersUiState> = _uiState.asStateFlow()
 
-    // Название сохранено для совместимости с MainActivity, но теперь это
-    // new + confirm ("на сборке") — то, с чем реально идёт работа на сборке.
-    val newOrders: StateFlow<List<OrderEntity>> = repository.getActiveOrders()
+    val newOrders: StateFlow<List<OrderEntity>> = repository.getNewOrders()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
@@ -52,39 +47,71 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
         viewModelScope.launch {}
     }
 
-// ui/viewmodel/OrdersViewModel.kt — обновить loadOrders()
-
     fun loadOrders() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            repository.syncAllOrders()
+            repository.syncNewOrders()
                 .onSuccess { count ->
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             lastSyncCount = count,
-                            lastSyncTime = System.currentTimeMillis()  // ← СОХРАНЯЕМ ВРЕМЯ
+                            lastSyncTime = System.currentTimeMillis()
                         )
                     }
                 }
                 .onFailure { error ->
                     val message = when (error) {
-                        is ApiException.Unauthorized -> "🔑 Токен невалиден. Выйдите и войдите заново."
-                        is ApiException.RateLimit -> "⏳ Слишком много запросов. Подождите..."
-                        is ApiException.ServerError -> "🔧 Сервер WB временно недоступен. Повторите позже."
-                        is ApiException.Timeout -> "⏱ Медленное соединение. Проверьте WiFi."
-                        is ApiException.NoInternet -> "📡 Нет интернета. Заказы сохранены локально."
-                        else -> "⚠️ Ошибка: ${error.message}"
+                        is ApiException.Unauthorized -> "Токен невалиден. Выйдите и войдите заново."
+                        is ApiException.RateLimit -> "Слишком много запросов. Подождите..."
+                        is ApiException.ServerError -> "Сервер WB временно недоступен. Повторите позже."
+                        is ApiException.Timeout -> "Медленное соединение. Проверьте WiFi."
+                        is ApiException.NoInternet -> "Нет интернета. Заказы сохранены локально."
+                        else -> "Ошибка: ${error.message}"
                     }
                     _uiState.update { it.copy(isLoading = false, error = message) }
                 }
         }
     }
-    // Добавить в OrdersViewModel
 
-    /**
-     * Синхронизация несинхронизированных заказов (при восстановлении интернета)
-     */
+    fun unmarkOrderScanned(orderId: Long) {
+        viewModelScope.launch {
+            repository.unmarkOrderScanned(orderId)
+        }
+    }
+
+    fun syncOrderStatuses() {
+        viewModelScope.launch {
+            repository.syncOrderStatuses()
+        }
+    }
+
+    fun scanWbSticker(stickerData: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(scanResult = null) }
+            when (val result = repository.scanWbSticker(stickerData)) {
+                is ScanResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            scanResult = ScanUiResult.Success(
+                                orderId = result.order.id,
+                                article = result.order.article,
+                                size = result.order.size,
+                                requiresSgtin = result.order.isMarked
+                            )
+                        )
+                    }
+                }
+                is ScanResult.NotFound -> {
+                    _uiState.update { it.copy(scanResult = ScanUiResult.NotFound) }
+                }
+                is ScanResult.Error -> {
+                    _uiState.update { it.copy(scanResult = ScanUiResult.Error(result.message)) }
+                }
+            }
+        }
+    }
+
     fun syncPendingOrders() {
         viewModelScope.launch {
             val unsynced = repository.getUnsyncedOrders()
@@ -104,9 +131,9 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
             }
 
             val message = when {
-                failCount == 0 -> "✅ Все $successCount заказов синхронизированы"
-                successCount == 0 -> "❌ Синхронизация не удалась. Проверьте интернет."
-                else -> "⚠️ Синхронизировано $successCount из ${successCount + failCount}"
+                failCount == 0 -> "Все $successCount заказов синхронизированы"
+                successCount == 0 -> "Синхронизация не удалась. Проверьте интернет."
+                else -> "Синхронизировано $successCount из ${successCount + failCount}"
             }
 
             _uiState.update { it.copy(isLoading = false, error = message) }
@@ -238,16 +265,13 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
 
-            // 1. Создаём поставку
             val supplyName =
                 "Поставка от ${java.text.SimpleDateFormat("dd.MM.yyyy").format(java.util.Date())}"
 
             repository.createSupply(supplyName)
                 .onSuccess { supplyId ->
-                    // 2. Добавляем заказы
                     repository.addOrdersToSupply(supplyId, orderIds)
                         .onSuccess {
-                            // 3. Передаём в доставку
                             repository.deliverSupply(supplyId)
                                 .onSuccess {
                                     _uiState.update {
@@ -283,7 +307,6 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
                         )
                     }
                 }
-            }
         }
     }
 }

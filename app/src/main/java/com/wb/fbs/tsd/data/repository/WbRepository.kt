@@ -41,7 +41,7 @@ class WbRepository(
 
     suspend fun getOrderById(orderId: Long): OrderEntity? = orderDao.getOrderById(orderId)
 
-        suspend fun syncNewOrders(): kotlin.Result<Int> = safeApiCall {
+    suspend fun syncNewOrders(): kotlin.Result<Int> = safeApiCall {
         requireApi().getNewOrders()
     }.map { response ->
         val serverOrders = response.orders?.map { it.toEntity() } ?: emptyList()
@@ -208,6 +208,11 @@ class WbRepository(
     // ==================== УТИЛИТЫ ====================
 
     private fun WbOrderDto.toEntity(): OrderEntity {
+        // Размер: brandSize (M/L/XL), fallback techSize (46/48), fallback chrtId
+        val sizeStr = size?.brandSize
+            ?: size?.techSize
+            ?: size?.chrtId?.toString()
+
         return OrderEntity(
             id = id,
             orderUid = orderUid ?: "",
@@ -216,7 +221,7 @@ class WbRepository(
             chrtId = chrtId ?: 0,
             name = "", // Название подтягивается из карточки товара (nmId)
             color = colorCode,
-            size = size,
+            size = sizeStr,
             barcode = skus?.firstOrNull(),
             price = price ?: 0,
             finalPrice = finalPrice ?: 0,
@@ -254,22 +259,20 @@ class WbRepository(
         orderDao.markOrderScanned(orderId, null)
     }
 
-    // ЗАМЕНИТЬ syncOrderStatuses на это:
-
     suspend fun syncOrderStatuses() {
         try {
             val localIds = orderDao.getAllOrderIds().first().take(100)
             if (localIds.isEmpty()) return
 
             val response = requireApi().getOrdersStatus(WbStatusRequest(localIds))
-            val ordersList = response.orders
+            val ordersList = response.body()?.orders
             if (ordersList != null) {
                 for (dto in ordersList) {
                     orderDao.updateOrderStatus(dto.id, dto.supplierStatus)
                 }
             }
         } catch (e: Exception) {
-            // Не критично
+            // Не критчно
         }
     }
 
@@ -347,15 +350,18 @@ class WbRepository(
         return kotlin.Result.failure(lastException ?: Exception("Unknown error"))
     }
 
-    // Sealed class для ошибок
-    sealed class ApiException(message: String) : Exception(message) {
-        class Unauthorized(message: String) : ApiException(message)
-        class RateLimit(message: String) : ApiException(message)
-        class ServerError(message: String) : ApiException(message)
-        class HttpError(val code: Int, message: String) : ApiException("HTTP $code: $message")
-        class Timeout(message: String) : ApiException(message)
-        class NoInternet(message: String) : ApiException(message)
-    }
+}
+
+// Sealed class для ошибок — top-level, а не вложенный: OrdersViewModel импортирует
+// com.wb.fbs.tsd.data.repository.ApiException напрямую, вложенный класс с таким же именем
+// не резолвится по этому импорту и молча ломает все `is ApiException.Xxx` проверки.
+sealed class ApiException(message: String) : Exception(message) {
+    class Unauthorized(message: String) : ApiException(message)
+    class RateLimit(message: String) : ApiException(message)
+    class ServerError(message: String) : ApiException(message)
+    class HttpError(val code: Int, message: String) : ApiException("HTTP $code: $message")
+    class Timeout(message: String) : ApiException(message)
+    class NoInternet(message: String) : ApiException(message)
 }
 
 sealed class ScanResult {

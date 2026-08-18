@@ -9,13 +9,6 @@ data class WbNewOrdersResponse(
     val orders: List<WbOrderDto>
 )
 
-// GET /api/v3/orders — сборочные задания за период, любой статус (без поля статуса в ответе,
-// статус нужно доуточнять через POST /api/v3/orders/status)
-data class WbOrdersResponse(
-    val next: Long?,
-    val orders: List<WbOrderDto>
-)
-
 data class WbOrderDto(
     val id: Long,
     val orderUid: String?,
@@ -23,7 +16,7 @@ data class WbOrderDto(
     val nmId: Long?,
     val chrtId: Long?,
     val colorCode: String?,
-    val size: String?,
+    val size: WbSizeDto?,
     val skus: List<String>?,
     val price: Long?,
     val finalPrice: Long?,
@@ -38,6 +31,17 @@ data class WbOrderDto(
     val supplyId: String?,
     val address: WbAddressDto?,
     val options: WbOptionsDto?
+)
+
+data class WbSizeDto(
+    val chrtId: Long?,
+    val techSize: String?,
+    val brandSize: String?,
+    val waist: Double?,
+    val chest: Double?,
+    val hips: Double?,
+    val weight: Double?,
+    val length: Double?
 )
 
 data class WbAddressDto(
@@ -128,21 +132,6 @@ interface WbApiService {
     @GET("/api/v3/orders/new")
     suspend fun getNewOrders(): Response<WbNewOrdersResponse>
 
-    // Все сборочные задания за период (созданные не более 3 мес. назад, макс. 30 дней за запрос).
-    // Не содержит текущий статус — статус доуточняется через getOrdersStatus().
-    @GET("/api/v3/orders")
-    suspend fun getOrders(
-        @Query("limit") limit: Int = 1000,
-        @Query("next") next: Long = 0,
-        @Query("dateFrom") dateFrom: Long? = null,
-        @Query("dateTo") dateTo: Long? = null
-    ): Response<WbOrdersResponse>
-
-    @POST("/api/v3/orders/status")
-    suspend fun getOrdersStatus(
-        @Body request: WbStatusRequest
-    ): Response<WbStatusResponse>
-
     @POST("/api/v3/orders/stickers")
     suspend fun getStickers(
         @Query("type") type: String = "svg",
@@ -208,6 +197,9 @@ interface WbApiService {
         @Path("supplyId") supplyId: String,
         @Query("type") type: String = "svg"
     ): Response<WbBarcodeResponse>
+
+    @POST("/api/v3/orders/status")
+    suspend fun getOrdersStatus(@Body request: WbStatusRequest): Response<WbStatusResponse>
 
     @GET("/api/marketplace/v3/supplies/{supplyId}/order-ids")
     suspend fun getSupplyOrderIds(
