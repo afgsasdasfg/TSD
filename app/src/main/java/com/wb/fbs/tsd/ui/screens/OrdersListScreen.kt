@@ -1,10 +1,13 @@
 package com.wb.fbs.tsd.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -12,26 +15,83 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.wb.fbs.tsd.data.db.OrderEntity
 import com.wb.fbs.tsd.ui.theme.*
-import com.wb.fbs.tsd.ui.viewmodel.OrdersUiState  // ← ПРЯМОЙ ИМПОРТ
+import com.wb.fbs.tsd.ui.viewmodel.OrdersUiState
+import com.wb.fbs.tsd.ui.viewmodel.ScanUiResult
+import kotlinx.coroutines.delay
 
 @Composable
 fun OrderListScreen(
     orders: List<OrderEntity>,
-    uiState: OrdersUiState,  // ← БЕЗ OrdersViewModel.
+    uiState: OrdersUiState,
     onSyncClick: () -> Unit,
     onOrderClick: (OrderEntity) -> Unit,
     onScanClick: () -> Unit,
     onScanKizClick: () -> Unit,
     onCreateSupplyClick: () -> Unit,
-    onSgtinEntered: (Long, String) -> Unit
+    onSgtinEntered: (Long, String) -> Unit,
+    onStickerScanned: (String) -> Unit = {},
+    onBarcodeScanned: (String) -> Unit = {},
+    onClearScan: () -> Unit = {}
 ) {
     var showKizDialog by remember { mutableStateOf(false) }
     var selectedOrder by remember { mutableStateOf<OrderEntity?>(null) }
+    val context = LocalContext.current
+
+    // === Скрытое TextField для ТСД-сканера (keyboard emulation) ===
+    // ТСД-сканер печатает код в focused TextField + Enter.
+    // Невидимое поле 1×1px с авто-фокусом — сканер печатает в него,
+    // Enter (ImeAction.Done) → onStickerScanned → заказ найдётся.
+    var scanInput by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+
+    // Авто-фокус при входе
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    // Восстановление фокуса после Toast/диалога
+    LaunchedEffect(uiState.scanResult, showKizDialog) {
+        if (uiState.scanResult == null && !showKizDialog) {
+            delay(100)
+            focusRequester.requestFocus()
+        }
+    }
+
+    // Toast результата скана
+    LaunchedEffect(uiState.scanResult) {
+        uiState.scanResult?.let { result ->
+            when (result) {
+                is ScanUiResult.Success -> {
+                    val order = orders.find { it.id == result.orderId }
+                    val msg = if (order != null) {
+                        "✅ ${order.article} — ${order.name}" + (order.size?.let { " (Размер: $it)" } ?: "")
+                    } else {
+                        "✅ Артикул ${result.article}"
+                    }
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    onClearScan()
+                }
+                is ScanUiResult.NotFound -> {
+                    Toast.makeText(context, "❌ Товар не найден", Toast.LENGTH_LONG).show()
+                    onClearScan()
+                }
+                is ScanUiResult.Error -> {
+                    Toast.makeText(context, "⚠️ ${result.message}", Toast.LENGTH_LONG).show()
+                    onClearScan()
+                }
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -77,7 +137,13 @@ fun OrderListScreen(
             }
         }
 
-        // Статус синхронизации
+        Text(
+            text = "💡 Сканируйте стикер ТСД — заказ найдётся и отметится автоматически",
+            fontSize = TextSizeSmall,
+            color = OnDarkSecondary,
+            modifier = Modifier.padding(vertical = 4.dp)
+        )
+
         if (uiState.isLoading) {
             LinearProgressIndicator(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -99,7 +165,6 @@ fun OrderListScreen(
             }
         }
 
-        // ← ИСПРАВЛЕНО: убрано if вне Composable, заменено на remember
         val syncText = remember(uiState.lastSyncCount, uiState.error) {
             if (uiState.lastSyncCount > 0 && uiState.error == null) "✅ Загружено ${uiState.lastSyncCount} заказов" else null
         }
@@ -114,7 +179,6 @@ fun OrderListScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // ДИАЛОГ КИЗ
         if (showKizDialog && selectedOrder != null) {
             KizInputDialog(
                 order = selectedOrder!!,
@@ -130,7 +194,6 @@ fun OrderListScreen(
             )
         }
 
-        // СПИСОК ЗАКАЗОВ
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxSize()
@@ -149,6 +212,42 @@ fun OrderListScreen(
                 )
             }
         }
+    }
+
+    // === Скрытое TextField 1×1px — приём скана с ТСД ===
+    Box(
+        modifier = Modifier
+            .size(1.dp)
+            .focusRequester(focusRequester),
+        contentAlignment = Alignment.Center
+    ) {
+        TextField(
+            value = scanInput,
+            onValueChange = { scanInput = it },
+            modifier = Modifier.size(1.dp),
+            textStyle = TextStyle(fontSize = 1.sp),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Text,
+                imeAction = ImeAction.Done
+            ),
+            keyboardActions = KeyboardActions(
+                onDone = {
+                    if (scanInput.isNotBlank()) {
+                        onStickerScanned(scanInput)
+                        scanInput = ""
+                    }
+                    focusRequester.requestFocus()
+                }
+            ),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = Color.Transparent,
+                unfocusedContainerColor = Color.Transparent,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                cursorColor = Color.Transparent
+            ),
+            singleLine = true
+        )
     }
 }
 

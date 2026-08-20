@@ -2,47 +2,103 @@ package com.wb.fbs.tsd.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.wb.fbs.tsd.ui.theme.*
 import com.wb.fbs.tsd.utils.VghLimits
+import kotlinx.coroutines.delay
 
-
+/**
+ * Обработка скана в зависимости от режима.
+ * Вызывается из поля ввода (Enter / ImeAction.Done).
+ */
+private fun submitScan(
+    value: String,
+    scanMode: String,
+    onBarcodeScanned: (String) -> Unit,
+    onSgtinScanned: (Long, String) -> Unit,
+    onStickerScanned: (String) -> Unit
+) {
+    if (value.isBlank()) return
+    when (scanMode) {
+        "barcode" -> onBarcodeScanned(value)
+        "sgtin" -> onSgtinScanned(-1, value)
+        "sticker" -> onStickerScanned(value)
+    }
+}
 
 @Composable
 fun ScanScreen(
     onBackClick: () -> Unit,
     onBarcodeScanned: (String) -> Unit,
-    onSgtinScanned: (String) -> Unit,
+    onSgtinScanned: (Long, String) -> Unit,
     onStickerScanned: (String) -> Unit,
     requiresSgtin: Boolean,
-    article: String?,
-    name: String?,
-    size: String?,
+    scannedOrderId: Long? = null,
+    article: String? = null,
+    name: String? = null,
+    size: String? = null,
     groupScanned: Int = 0,
     groupTotal: Int = 0,
     scanError: String? = null,
+    sgtinSaved: Boolean = false,
     onClearScan: () -> Unit = {},
     cargoType: Int = 1,
     onDevice: Int = 0,
     onServer: Int = 0
 ) {
-    var scanMode by remember { mutableStateOf("sticker") } // sticker | barcode | sgtin
+    var scanMode by rememberSaveable { mutableStateOf("sticker") }
     var input by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+
+    // Авто-фокус при входе — ТСД-сканер печатает в поле
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    // Восстановление фокуса после сброса результата
+    LaunchedEffect(article, scanError, sgtinSaved) {
+        if (article == null && scanError == null && !sgtinSaved) {
+            delay(100)
+            focusRequester.requestFocus()
+        }
+    }
+
+    // Авто-переход в режим КИЗ после скана стикера
+    LaunchedEffect(scannedOrderId, requiresSgtin) {
+        if (scannedOrderId != null && requiresSgtin && !sgtinSaved) {
+            scanMode = "sgtin"
+        }
+    }
+
+    fun confirmScan() {
+        if (input.isBlank()) return
+        if (scanMode == "sgtin" && scannedOrderId != null) {
+            onSgtinScanned(scannedOrderId, input)
+        } else {
+            submitScan(input, scanMode, onBarcodeScanned, onSgtinScanned, onStickerScanned)
+        }
+        input = ""
+        focusRequester.requestFocus()
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(DarkBackground)
             .padding(16.dp)
-    )  {
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -65,7 +121,37 @@ fun ScanScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        if (article != null) {
+        // --- КИЗ успешно сохранён ---
+        if (sgtinSaved && scannedOrderId != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = PrimaryGreen.copy(alpha = 0.15f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        "✅ КИЗ привязан к заказу!",
+                        fontSize = TextSizeLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = PrimaryGreen
+                    )
+                    if (article != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Артикул: $article", fontSize = TextSizeMedium, color = OnDarkPrimary)
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            OutlinedButton(
+                onClick = { onClearScan() },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("🔄 Сканировать следующий", color = OnDarkSecondary)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        // --- Карточка найденного заказа ---
+        if (article != null && !sgtinSaved) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant)
@@ -79,7 +165,6 @@ fun ScanScreen(
                     if (size != null) {
                         Text("Размер: $size", fontSize = TextSizeMedium, color = OnDarkSecondary)
                     }
-                    // Счётчик по группе: «Собрано 3 из 5 шт»
                     if (groupTotal > 0) {
                         Spacer(modifier = Modifier.height(8.dp))
                         val allScanned = groupScanned >= groupTotal
@@ -98,11 +183,24 @@ fun ScanScreen(
                             trackColor = OnDarkDisabled.copy(alpha = 0.3f)
                         )
                     }
+
+                    if (requiresSgtin && scannedOrderId != null) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = PrimaryGreen.copy(alpha = 0.12f))
+                        ) {
+                            Text(
+                                "🏷️ Теперь отсканируйте КИЗ (Data Matrix)\nи привяжите к этому заказу",
+                                fontSize = TextSizeMedium,
+                                color = PrimaryGreen,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
 
-            // ВГХ ПВЗ — лимиты габаритов
             val vgh = VghLimits.getLimits(cargoType)
             if (vgh != null) {
                 Card(
@@ -132,7 +230,6 @@ fun ScanScreen(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            // На устройстве / На сервере
             if (onDevice > 0 || onServer > 0) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -154,7 +251,9 @@ fun ScanScreen(
                 }
                 Spacer(modifier = Modifier.height(16.dp))
             }
+        }
 
+        // --- Ошибка ---
         if (scanError != null) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -170,8 +269,7 @@ fun ScanScreen(
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // Кнопка сброса результата — чтобы сканировать следующий товар
-        if (article != null || scanError != null) {
+        if ((article != null || scanError != null) && !sgtinSaved) {
             OutlinedButton(
                 onClick = { onClearScan() },
                 modifier = Modifier.fillMaxWidth(),
@@ -184,6 +282,7 @@ fun ScanScreen(
             Spacer(modifier = Modifier.height(16.dp))
         }
 
+        // --- Переключатель режима ---
         Row(modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(
                 onClick = { scanMode = "barcode" },
@@ -219,10 +318,13 @@ fun ScanScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // Поле ввода — в фокусе для ТСД-сканера
         OutlinedTextField(
             value = input,
             onValueChange = { input = it },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(focusRequester),
             label = {
                 Text(
                     when (scanMode) {
@@ -235,6 +337,10 @@ fun ScanScreen(
                 )
             },
             singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(
+                onDone = { confirmScan() }
+            ),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = when (scanMode) {
                     "sticker" -> WarningOrange
@@ -250,16 +356,7 @@ fun ScanScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(
-            onClick = {
-                if (input.isNotBlank()) {
-                    when (scanMode) {
-                        "barcode" -> onBarcodeScanned(input)
-                        "sgtin" -> onSgtinScanned(input)
-                        "sticker" -> onStickerScanned(input)
-                    }
-                    input = ""
-                }
-            },
+            onClick = { confirmScan() },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(ButtonHeightLarge),
@@ -286,13 +383,13 @@ fun ScanScreen(
         Spacer(modifier = Modifier.height(16.dp))
         Text(
             text = when (scanMode) {
-                "barcode" -> "💡 Отсканируйте штрихкод товара (EAN-13)"
+                "barcode" -> "💡 Отсканируйте штрихкод товара (EAN-13)\nМожно сканером ТСД — код подставится автоматически"
                 "sgtin" -> "💡 Отсканируйте Data Matrix с маркировки\nФормат КИЗ: (01)GTIN(21)Серийный номер"
-                "sticker" -> "💡 Отсканируйте QR-код на стикере WB\nНапример: 1561234567890"
+                "sticker" -> "💡 Отсканируйте QR-код на стикере WB\nМожно сканером ТСД — код подставится автоматически"
                 else -> ""
             },
             fontSize = TextSizeSmall,
             color = OnDarkSecondary
         )
     }
-}}
+}

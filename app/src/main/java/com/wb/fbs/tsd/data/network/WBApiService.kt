@@ -6,6 +6,7 @@ import retrofit2.http.*
 // ==================== DTO ====================
 
 data class WbNewOrdersResponse(
+    val next: Long? = null,
     val orders: List<WbOrderDto>
 )
 
@@ -30,7 +31,8 @@ data class WbOrderDto(
     val createdAt: String?,  // ISO 8601
     val supplyId: String?,
     val address: WbAddressDto?,
-    val options: WbOptionsDto?
+    val options: WbOptionsDto?,
+    val supplierStatus: String? = null  // отдаётся только в /api/v3/orders, не в /orders/new
 )
 
 data class WbSizeDto(
@@ -131,6 +133,14 @@ interface WbApiService {
 
     @GET("/api/v3/orders/new")
     suspend fun getNewOrders(): Response<WbNewOrdersResponse>
+
+    // Все заказы за период (включая confirm, complete, cancel)
+    // limit=1000 max, pagination через next
+    @GET("/api/v3/orders")
+    suspend fun getOrders(
+        @Query("limit") limit: Int = 1000,
+        @Query("next") next: Long = 0
+    ): Response<WbNewOrdersResponse>
 
     @POST("/api/v3/orders/stickers")
     suspend fun getStickers(

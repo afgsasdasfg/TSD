@@ -1,6 +1,7 @@
 package com.wb.fbs.tsd
 
 import android.app.Application
+import android.database.sqlite.SQLiteDatabase
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
@@ -72,14 +73,46 @@ class TsdApplication : Application() {
     }
 
     private fun createDatabaseWithRecovery(): AppDatabase {
-        // Простое создание БД. Recovery при повреждении делается
-        // через fallbackToDestructiveMigration + try/catch в ViewModel.
-        // Принудительное открытие в Application.onCreate() крашит
-        // т.к. Room запрещает БД-операции в главном потоке.
+        // Принудительно удаляем старую БД при несовпадении версий.
+        // fallbackToDestructiveMigration() в Room 2.6.1 не всегда срабатывает
+        // при больших скачках (1→4) — краш всё равно падает.
+        // Поэтому: пробуем открыть, при краше — удаляем файл и пересоздаём.
+        val dbName = "tsd_database"
+        val dbFile = applicationContext.getDatabasePath(dbName)
+        // Проверяем: если файл БД существует, но схема старая — удаляем.
+        // Room сам не умеет мигрировать 1→4 (нет Migration path),
+        // fallbackToDestructiveMigration должен сработать, но на некоторых
+        // устройствах/версиях Android он не перехватывает IllegalStateException.
+        // Надёжнее: удалить файл до открытия Room.
+        try {
+            if (dbFile.exists()) {
+                // Открываем SQLite напрямую, чтобы проверить версию
+                val db = SQLiteDatabase.openDatabase(
+                    dbFile.absolutePath,
+                    null,
+                    SQLiteDatabase.OPEN_READWRITE
+                )
+                val dbVersion = db.version
+                db.close()
+                if (dbVersion < 4) {
+                    // Старая схема — удаляем файл и wal/shm
+                    dbFile.delete()
+                    File(dbFile.absolutePath + "-wal").delete()
+                    File(dbFile.absolutePath + "-shm").delete()
+                    File(dbFile.absolutePath + "-journal").delete()
+                }
+            }
+        } catch (_: Throwable) {
+            // Не смогли открыть/проверить — удаляем
+            try { dbFile.delete() } catch (_: Throwable) {}
+            try { File(dbFile.absolutePath + "-wal").delete() } catch (_: Throwable) {}
+            try { File(dbFile.absolutePath + "-shm").delete() } catch (_: Throwable) {}
+        }
+
         return Room.databaseBuilder(
             applicationContext,
             AppDatabase::class.java,
-            "tsd_database"
+            dbName
         )
             .fallbackToDestructiveMigration()
             .fallbackToDestructiveMigrationOnDowngrade()

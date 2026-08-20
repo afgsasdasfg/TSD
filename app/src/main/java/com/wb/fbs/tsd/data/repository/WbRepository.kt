@@ -66,24 +66,46 @@ class WbRepository(
     suspend fun getOrderById(orderId: Long): OrderEntity? = orderDao.getOrderById(orderId)
 
     suspend fun syncNewOrders(): kotlin.Result<Int> {
-        // Тянем только новые заказы через /api/v3/orders/new.
-        // Заказы, переведённые в «на сборке» (confirm), не отдаются здесь —
-        // но они уже в БД (были скачаны как new ранее), и их статус
-        // обновится через syncOrderStatuses().
-        //
-        // /api/v3/orders (все заказы) НЕ используем — отдаёт 10000+ заказов
-        // (завершённые, отменённые и т.д.), это мусор.
-        return safeApiCall { requireApi().getNewOrders() }.map { response ->
+        // 1. Тянем новые заказы через /api/v3/orders/new
+        val newCount = safeApiCall { requireApi().getNewOrders() }.map { response ->
             val serverOrders = response.orders?.map { it.toEntity() } ?: emptyList()
             orderDao.insertOrders(serverOrders)
-            // Сразу подтягиваем актуальные статусы (new → confirm → complete…)
-            // syncOrderStatuses() не должен ронять syncNewOrders —
-            // ошибки статусов не критичны.
-            if (serverOrders.isNotEmpty()) {
-                try { syncOrderStatuses() } catch (_: Throwable) {}
-            }
             serverOrders.size
-        }
+        }.getOrElse { 0 }
+
+        // Пауза между запросами — WB rate limit ~100 req/min
+        delay(700)
+
+        // 2. Тянем ВСЕ заказы за период через /api/v3/orders —
+        //    /orders/new отдаёт только status=new. Заказы, переведённые
+        //    в «на сборке» (confirm) на портале, не попадают в /orders/new.
+        //    /api/v3/orders отдаёт все заказы (new, confirm, complete, cancel)
+        //    с пагинацией по 1000. Тянем только первую страницу —
+        //    для склада этого достаточно (недавние заказы).
+        var confirmCount = 0
+        try {
+            val allResponse = requireApi().getOrders(limit = 1000, next = 0)
+            if (allResponse.isSuccessful) {
+                val allOrders = allResponse.body()?.orders ?: emptyList()
+                // Сохраняем только new и confirm — complete/cancel не нужны
+                val relevant = allOrders.filter {
+                    it.supplierStatus == null || it.supplierStatus == "new" || it.supplierStatus == "confirm"
+                }
+                // toEntity() ставит status="new" по умолчанию; supplierStatus
+                // придёт из /api/v3/orders/status — обновится через syncOrderStatuses()
+                orderDao.insertOrders(relevant.map { it.toEntity() })
+                confirmCount = relevant.size
+            }
+        } catch (_: Throwable) {}
+
+        // Пауза перед статусами
+        delay(700)
+
+        // 3. Обновляем статусы (new → confirm → complete…)
+        //    syncOrderStatuses() внутри вызывает syncMissingStickers()
+        try { syncOrderStatuses() } catch (_: Throwable) {}
+
+        return kotlin.Result.success(newCount + confirmCount)
     }
 
     suspend fun createSupply(name: String): kotlin.Result<String> = safeApiCall {
@@ -173,6 +195,8 @@ class WbRepository(
         for (i in ids.indices step batchSize) {
             val batch = ids.subList(i, minOf(i + batchSize, ids.size))
             downloadStickers(batch).onSuccess { total += it.size }
+            // Пауза между батчами стикеров
+            if (i + batchSize < ids.size) delay(700)
         }
         return kotlin.Result.success(total)
     }
@@ -306,7 +330,7 @@ class WbRepository(
             comment = comment,
             createdAt = parseDate(createdAt),
             supplyId = supplyId,
-            status = "new", // Статус обновляется через syncOrderStatuses()
+            status = supplierStatus ?: "new", // /api/v3/orders отдаёт supplierStatus
             isMarked = (requiredMeta?.joinToString(",") ?: "").contains("sgtin") || (optionalMeta?.joinToString(",") ?: "").contains("sgtin"),
             sgtin = null,
             isSynced = true,
@@ -391,6 +415,9 @@ class WbRepository(
 
                 cursor = response.body()?.cursor
                 if (cursor?.updatedAt == null && cursor?.nmID == null) break
+
+                // Пауза между страницами Content API
+                if (nmIdSet.isNotEmpty()) delay(700)
             }
 
             return kotlin.Result.success(updatedCount)
@@ -433,6 +460,8 @@ class WbRepository(
                         orderDao.updateOrderStatus(dto.id, dto.supplierStatus)
                     }
                 }
+                // Пауза между батчами статусов — не упираемся в rate limit
+                if (i + batchSize < allIds.size) delay(700)
             }
             // Заказы, перешедшие в confirm/complete ("на сборке"), ещё не имеют
             // stickerBarcode — дотягиваем стикеры, иначе сканирование стикера на сборке
@@ -549,7 +578,9 @@ class WbRepository(
                         )
                     }
                     429 -> {
-                        val delayMs = (1 shl attempt) * 1000L
+                        // WB rate limit: ~100 req/min. Экспоненциальная задержка + джиттер.
+                        // 1s → 2s → 4s (+ random 0-500ms) = max ~6.5s за 3 ретрая
+                        val delayMs = (1 shl attempt) * 1000L + (0..500).random()
                         delay(delayMs)
                         lastException = ApiException.RateLimit("429, retry ${attempt + 1}/$maxRetries")
                     }

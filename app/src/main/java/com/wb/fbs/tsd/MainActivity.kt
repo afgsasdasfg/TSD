@@ -172,7 +172,14 @@ fun TsdApp() {
                     onCreateSupplyClick = { /* TODO */ },
                     onSgtinEntered = { orderId, sgtin ->
                         viewModel.scanSgtin(orderId, sgtin)
-                    }
+                    },
+                    onStickerScanned = { stickerData ->
+                        viewModel.scanWbSticker(stickerData)
+                    },
+                    onBarcodeScanned = { barcode ->
+                        viewModel.scanBarcode(barcode)
+                    },
+                    onClearScan = { viewModel.clearScanResult() }
                 )
             }
 
@@ -205,19 +212,23 @@ fun TsdApp() {
                     onBarcodeScanned = { barcode ->
                         viewModel.scanBarcode(barcode)
                     },
-                    onSgtinScanned = { sgtin ->
-                        navController.popBackStack()
+                    onSgtinScanned = { orderId, sgtin ->
+                        if (orderId > 0) {
+                            viewModel.scanSgtin(orderId, sgtin)
+                        }
                     },
                     onStickerScanned = { stickerData ->
                         viewModel.scanWbSticker(stickerData)
                     },
-                    requiresSgtin = false,
+                    requiresSgtin = (uiState.scanResult as? ScanUiResult.Success)?.requiresSgtin ?: false,
+                    scannedOrderId = (uiState.scanResult as? ScanUiResult.Success)?.orderId,
                     article = (uiState.scanResult as? ScanUiResult.Success)?.article,
                     name = (uiState.scanResult as? ScanUiResult.Success)?.name,
                     size = (uiState.scanResult as? ScanUiResult.Success)?.size,
                     groupScanned = (uiState.scanResult as? ScanUiResult.Success)?.groupScanned ?: 0,
                     groupTotal = (uiState.scanResult as? ScanUiResult.Success)?.groupTotal ?: 0,
                     scanError = (uiState.scanResult as? ScanUiResult.Error)?.message,
+                    sgtinSaved = uiState.sgtinSaved,
                     onClearScan = { viewModel.clearScanResult() },
                     cargoType = (uiState.scanResult as? ScanUiResult.Success)?.cargoType ?: 1,
                     onDevice = (uiState.scanResult as? ScanUiResult.Success)?.onDevice ?: 0,

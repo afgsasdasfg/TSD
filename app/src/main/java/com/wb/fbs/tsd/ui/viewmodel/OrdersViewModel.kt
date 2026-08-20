@@ -242,7 +242,7 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
                     _uiState.update { it.copy(sgtinSaved = true) }
                 }
                 .onFailure { error ->
-                    _uiState.update { it.copy(error = error.message) }
+                    _uiState.update { it.copy(error = error.message, sgtinSaved = false) }
                 }
         }
     }
