@@ -84,9 +84,11 @@ fun HomeScreen(
 
         val buttons = listOf(
             listOf("📋", "Заказы FBS", "#2196F3", "orders"),
-            listOf("🚚", "Сборка заказов", "#9C27B0", "picking"),
-            listOf("📦", "Собранные заказы", "#FF9800", "collected"),
-            listOf("📋", "Сканирование", "#4CAF50", "scan")
+            listOf("🚚", "Сборка", "#9C27B0", "picking"),
+            listOf("📦", "Собранные", "#FF9800", "collected"),
+            listOf("🔍", "Сканирование", "#4CAF50", "scan"),
+            listOf("🏷️", "Этикетка / QR", "#607D8B", "supply_qr"),
+            listOf("📋", "Дубликат КМ", "#795548", "duplicate_km")
         )
 
         for (button in buttons) {

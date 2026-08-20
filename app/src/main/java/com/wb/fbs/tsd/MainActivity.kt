@@ -182,20 +182,21 @@ fun TsdApp() {
 
             composable("scan") {
                 // Toast результата сканирования
+                // Toast больше не нужен — результат скана показывается
+                // прямо на ScanScreen в карточке «Текущий товар».
+                // Toast оставлен только для NotFound, т.к. ScanScreen не знает
+                // что скан не удался (ошибка показывается через scanError).
                 LaunchedEffect(uiState.scanResult) {
                     uiState.scanResult?.let { result ->
                         when (result) {
-                            is ScanUiResult.Success -> {
-                                Toast.makeText(context, "✅ ${result.article}", Toast.LENGTH_SHORT).show()
-                            }
                             is ScanUiResult.NotFound -> {
                                 Toast.makeText(context, "❌ Товар не найден", Toast.LENGTH_SHORT).show()
+                                viewModel.clearScanResult()
                             }
-                            is ScanUiResult.Error -> {
-                                Toast.makeText(context, "⚠️ ${result.message}", Toast.LENGTH_SHORT).show()
+                            else -> {
+                                // Success/Error показываются на ScanScreen
                             }
                         }
-                        viewModel.clearScanResult()
                     }
                 }
 
@@ -203,18 +204,24 @@ fun TsdApp() {
                     onBackClick = { navController.popBackStack() },
                     onBarcodeScanned = { barcode ->
                         viewModel.scanBarcode(barcode)
-                        navController.popBackStack()
                     },
                     onSgtinScanned = { sgtin ->
                         navController.popBackStack()
                     },
                     onStickerScanned = { stickerData ->
                         viewModel.scanWbSticker(stickerData)
-                        navController.popBackStack()
                     },
                     requiresSgtin = false,
-                    article = null,
-                    size = null
+                    article = (uiState.scanResult as? ScanUiResult.Success)?.article,
+                    name = (uiState.scanResult as? ScanUiResult.Success)?.name,
+                    size = (uiState.scanResult as? ScanUiResult.Success)?.size,
+                    groupScanned = (uiState.scanResult as? ScanUiResult.Success)?.groupScanned ?: 0,
+                    groupTotal = (uiState.scanResult as? ScanUiResult.Success)?.groupTotal ?: 0,
+                    scanError = (uiState.scanResult as? ScanUiResult.Error)?.message,
+                    onClearScan = { viewModel.clearScanResult() },
+                    cargoType = (uiState.scanResult as? ScanUiResult.Success)?.cargoType ?: 1,
+                    onDevice = (uiState.scanResult as? ScanUiResult.Success)?.onDevice ?: 0,
+                    onServer = (uiState.scanResult as? ScanUiResult.Success)?.onServer ?: 0
                 )
             }
 
@@ -242,10 +249,19 @@ fun TsdApp() {
                     orders = orders,
                     onBackClick = { navController.popBackStack() },
                     onOrderClick = { order ->
-                        if (order.scannedAt != null) {
-                            viewModel.unmarkOrderScanned(order.id)
-                        } else {
-                            viewModel.markOrderScanned(order.id)
+                        when {
+                            // Не собран → собрать
+                            order.scannedAt == null -> {
+                                viewModel.markOrderScanned(order.id)
+                            }
+                            // Собран, но не упакован → упаковать
+                            order.packedAt == null -> {
+                                viewModel.markOrderPacked(order.id)
+                            }
+                            // Упакован → распаковать
+                            else -> {
+                                viewModel.unmarkOrderPacked(order.id)
+                            }
                         }
                     },
                     onScanKizForOrder = { orderId ->
@@ -281,8 +297,55 @@ fun TsdApp() {
                         viewModel.createSupplyAndDeliver(orderIds)
                     },
                     onShowQrClick = { supplyId ->
-                        // TODO: Показать QR
+                        navController.navigate("supply_qr/$supplyId")
                     }
+                )
+            }
+
+            composable(
+                "supply_qr/{supplyId}",
+                arguments = listOf(navArgument("supplyId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val supplyId = backStackEntry.arguments?.getString("supplyId") ?: ""
+                LaunchedEffect(supplyId) {
+                    if (uiState.supplyQrSvg == null) {
+                        viewModel.getSupplyQr(supplyId)
+                    }
+                }
+                SupplyQrScreen(
+                    supplyId = supplyId,
+                    qrSvgBase64 = uiState.supplyQrSvg,
+                    isLoading = uiState.isLoading,
+                    error = uiState.error,
+                    onBackClick = {
+                        viewModel.clearSupplyQr()
+                        navController.popBackStack()
+                    },
+                    onRefreshClick = { viewModel.getSupplyQr(supplyId) }
+                )
+            }
+
+            composable("supply_qr") {
+                // Без supplyId — выбор из списка поставок
+                SupplyQrScreen(
+                    supplyId = uiState.createdSupplyId ?: "",
+                    qrSvgBase64 = uiState.supplyQrSvg,
+                    isLoading = uiState.isLoading,
+                    error = uiState.error,
+                    onBackClick = {
+                        viewModel.clearSupplyQr()
+                        navController.popBackStack()
+                    },
+                    onRefreshClick = {
+                        uiState.createdSupplyId?.let { viewModel.getSupplyQr(it) }
+                    }
+                )
+            }
+
+            composable("duplicate_km") {
+                DuplicateKmScreen(
+                    orders = orders,
+                    onBackClick = { navController.popBackStack() }
                 )
             }
 

@@ -41,6 +41,9 @@ interface OrderDao {
     @Query("UPDATE orders SET scannedAt = :timestamp, isSynced = 0 WHERE id = :orderId")
     suspend fun markOrderScanned(orderId: Long, timestamp: Long?)
 
+    @Query("UPDATE orders SET packedAt = :timestamp, isSynced = 0 WHERE id = :orderId")
+    suspend fun markOrderPacked(orderId: Long, timestamp: Long?)
+
     @Query("UPDATE orders SET stickerPrinted = 1, isSynced = 0 WHERE id = :orderId")
     suspend fun markStickerPrinted(orderId: Long)
 
@@ -56,6 +59,9 @@ interface OrderDao {
     @Query("SELECT * FROM orders")
     fun getAllOrders(): Flow<List<OrderEntity>>
 
+    @Query("SELECT id FROM orders WHERE status IN ('new', 'confirm')")
+    fun getActiveOrderIds(): Flow<List<Long>>
+
     @Query("SELECT id FROM orders")
     fun getAllOrderIds(): Flow<List<Long>>
 
@@ -64,5 +70,38 @@ interface OrderDao {
 
     @Delete
     suspend fun deleteOrder(order: OrderEntity)
+
+    // ==================== СТИКЕРЫ WB (уникальны для заказа, в отличие от
+    // баркода товара, который может повторяться в разных кабинетах WB) ====================
+
+    // Заказы "на сборке"/"в доставке", для которых ещё не скачан стикер
+    @Query("SELECT * FROM orders WHERE status IN ('confirm', 'complete') AND stickerBarcode IS NULL")
+    suspend fun getOrdersNeedingStickers(): List<OrderEntity>
+
+    @Query("UPDATE orders SET stickerBarcode = :barcode, stickerPartA = :partA, stickerPartB = :partB, isSynced = 0 WHERE id = :orderId")
+    suspend fun updateStickerData(orderId: Long, barcode: String?, partA: String?, partB: String?)
+
+    // Поиск заказа по коду, реально закодированному в стикере WB — именно
+    // это сканирует ТСД при сборке, а не баркод товара
+    @Query("SELECT * FROM orders WHERE stickerBarcode = :barcode LIMIT 1")
+    suspend fun getOrderByStickerBarcode(barcode: String): OrderEntity?
+
+    // Полная очистка локальных заказов — нужна при переключении между
+    // кабинетами WB, чтобы старые заказы одного кабинета не путались с
+    // новыми заказами другого (баркоды товаров совпадают между кабинетами)
+    @Query("DELETE FROM orders")
+    suspend fun clearAllOrders()
+
+    // ==================== РАЗМЕРЫ ИЗ CONTENT API ====================
+
+    // Батч-апдейт: обновить размер конкретного заказа по chrtId.
+    // Content API отдаёт размеры карточки по nmId — каждая карточка
+    // может иметь несколько размеров, каждый со своим chrtId.
+    @Query("UPDATE orders SET size = :size, updatedAt = :updatedAt WHERE chrtId = :chrtId AND (size IS NULL OR size = '' OR size = '0')")
+    suspend fun updateSizeByChrtId(chrtId: Long, size: String, updatedAt: Long = System.currentTimeMillis())
+
+    // Получить все уникальные nmId из заказов, где размер пустой/нулевой
+    @Query("SELECT DISTINCT nmId FROM orders WHERE size IS NULL OR size = '' OR size = '0'")
+    suspend fun getNmIdsNeedingSizes(): List<Long>
 
 }

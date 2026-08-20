@@ -56,7 +56,7 @@ fun AuthScreen(onTokenSaved: (String) -> Unit) {
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(
-            onClick = { if (token.isNotBlank()) onTokenSaved(token) },
+            onClick = { if (token.isNotBlank()) onTokenSaved(token.trim().replace("\n", "").replace("\r", "")) },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(ButtonHeightLarge),

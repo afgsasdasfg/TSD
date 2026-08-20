@@ -200,8 +200,19 @@ private fun CheckingItemCard(item: OrderItem) {
                     color = OnDarkPrimary
                 )
 
+                // Размер — отдельно и крупно: складчик при проверке ориентируется
+                // по размеру, а не по штрихкоду.
+                if (item.size.isNotBlank()) {
+                    Text(
+                        text = "Размер: ${item.size}",
+                        fontSize = TextSizeLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = WarningOrange
+                    )
+                }
+
                 Text(
-                    text = "Арт: ${item.article} | ${item.color} | ${item.size}",
+                    text = "Арт: ${item.article} | ${item.color}",
                     fontSize = TextSizeSmall,
                     color = OnDarkSecondary
                 )

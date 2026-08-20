@@ -25,9 +25,11 @@ fun CollectedOrdersScreen(
     onDeliverClick: (List<Long>) -> Unit,  // Список orderId для передачи
     onShowQrClick: (String) -> Unit  // Показать QR поставки
 ) {
-    // Только собранные заказы (scannedAt != null)
+    // Этапы поставки: 0=сборка, 1=грузоместа, 2=передача
+    var supplyStage by remember { mutableStateOf(0) }
+    // Только упакованные заказы (packedAt != null)
     val collectedOrders = remember(orders) {
-        orders.filter { it.scannedAt != null }
+        orders.filter { it.packedAt != null }
     }
 
     // Выбранные заказы
@@ -50,12 +52,20 @@ fun CollectedOrdersScreen(
                 Icon(Icons.Default.ArrowBack, "Назад", tint = OnDarkPrimary)
             }
             Text(
-                "📦 Собранные заказы",
+                "📦 Упакованные заказы",
                 fontSize = TextSizeExtraLarge,
                 fontWeight = FontWeight.Bold,
                 color = OnDarkPrimary
             )
         }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Степпер этапов поставки
+        SupplyStageStepper(
+            currentStage = supplyStage,
+            onStageClick = { supplyStage = it }
+        )
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -66,7 +76,7 @@ fun CollectedOrdersScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    "Собрано: ${collectedOrders.size}",
+                    "Упаковано: ${collectedOrders.size}",
                     fontSize = TextSizeLarge,
                     fontWeight = FontWeight.Bold,
                     color = OnDarkPrimary
@@ -157,6 +167,11 @@ private fun CollectedOrderCard(
                     fontWeight = FontWeight.Bold,
                     color = OnDarkPrimary
                 )
+                Text(
+                    text = order.name,
+                    fontSize = TextSizeMedium,
+                    color = OnDarkSecondary
+                )
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -199,6 +214,62 @@ private fun CollectedOrderCard(
                     uncheckedColor = OnDarkDisabled
                 )
             )
+        }
+    }
+}
+
+@Composable
+private fun SupplyStageStepper(
+    currentStage: Int,
+    onStageClick: (Int) -> Unit
+) {
+    val stages = listOf(
+        "📦 Соберите заказы" to 0,
+        "🏷️ Создайте грузоместа" to 1,
+        "🚚 Передайте в доставку" to 2
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        stages.forEachIndexed { index, (label, _) ->
+            val isActive = index == currentStage
+            val isDone = index < currentStage
+            val color = when {
+                isDone -> PrimaryGreen
+                isActive -> WarningOrange
+                else -> OnDarkDisabled
+            }
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onStageClick(index) },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isActive) color.copy(alpha = 0.15f) else DarkSurface
+                    ),
+                    border = if (isActive) BorderStroke(2.dp, color) else null
+                ) {
+                    Column(
+                        modifier = Modifier.padding(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = if (isDone) "✅" else "${index + 1}",
+                            fontSize = TextSizeMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = color
+                        )
+                        Text(
+                            text = label,
+                            fontSize = TextSizeSmall,
+                            color = if (isActive) OnDarkPrimary else OnDarkSecondary
+                        )
+                    }
+                }
+            }
         }
     }
 }

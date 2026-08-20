@@ -20,15 +20,23 @@ data class OrdersUiState(
     val scanResult: ScanUiResult? = null,
     val sgtinSaved: Boolean = false,
     val createdSupplyId: String? = null,
-    val kizValidation: KizValidationUiResult? = null
+    val kizValidation: KizValidationUiResult? = null,
+    val supplyQrSvg: String? = null,
+    val supplyStage: Int = 0  // 0=сборка, 1=грузоместа, 2=передача
 )
 
 sealed class ScanUiResult {
     data class Success(
         val orderId: Long,
         val article: String,
+        val name: String,
         val size: String?,
-        val requiresSgtin: Boolean
+        val requiresSgtin: Boolean,
+        val groupScanned: Int = 0,
+        val groupTotal: Int = 1,
+        val cargoType: Int = 1,
+        val onDevice: Int = 0,
+        val onServer: Int = 0
     ) : ScanUiResult()
     object NotFound : ScanUiResult()
     data class Error(val message: String) : ScanUiResult()
@@ -43,40 +51,70 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
-        loadOrders()
-        viewModelScope.launch {}
+        // Автосинхронизация при старте — только если есть API.
+        // loadOrders() обёрнут в try/catch: если WB API недоступен
+        // или токен протух, приложение не должно падать при запуске.
+        // Пользователь увидит ошибку в UI, а не краш.
+        if (repository.hasApi) {
+            loadOrders()
+        }
     }
 
     fun loadOrders() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            repository.syncNewOrders()
-                .onSuccess { count ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            lastSyncCount = count,
-                            lastSyncTime = System.currentTimeMillis()
-                        )
+            try {
+                repository.syncNewOrders()
+                    .onSuccess { count ->
+                        // Подтягиваем реальные размеры через Content API.
+                        // Не падает если Content API недоступен — syncProductSizes
+                        // имеет внутренний try/catch.
+                        try {
+                            repository.syncProductSizes()
+                        } catch (e: Throwable) {
+                            // Не критично — размеры подтянутся позже
+                        }
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                lastSyncCount = count,
+                                lastSyncTime = System.currentTimeMillis()
+                            )
+                        }
                     }
-                }
-                .onFailure { error ->
-                    val message = when (error) {
-                        is ApiException.Unauthorized -> "Токен невалиден. Выйдите и войдите заново."
-                        is ApiException.RateLimit -> "Слишком много запросов. Подождите..."
-                        is ApiException.ServerError -> "Сервер WB временно недоступен. Повторите позже."
-                        is ApiException.Timeout -> "Медленное соединение. Проверьте WiFi."
-                        is ApiException.NoInternet -> "Нет интернета. Заказы сохранены локально."
-                        else -> "Ошибка: ${error.message}"
+                    .onFailure { error ->
+                        val message = when (error) {
+                            is ApiException.Unauthorized -> "Токен невалиден. Выйдите и войдите заново."
+                            is ApiException.RateLimit -> "Слишком много запросов. Подождите..."
+                            is ApiException.ServerError -> "Сервер WB временно недоступен. Повторите позже."
+                            is ApiException.Timeout -> "Медленное соединение. Проверьте WiFi."
+                            is ApiException.NoInternet -> "Нет интернета. Заказы сохранены локально."
+                            else -> "Ошибка: ${error.message}"
+                        }
+                        _uiState.update { it.copy(isLoading = false, error = message) }
                     }
-                    _uiState.update { it.copy(isLoading = false, error = message) }
-                }
+            } catch (e: Throwable) {
+                // Ловим даже Error (OutOfMemoryError, NoClassDefFoundError и т.д.)
+                _uiState.update { it.copy(isLoading = false, error = "Ошибка синхронизации: ${e.message}") }
+            }
         }
     }
 
     fun unmarkOrderScanned(orderId: Long) {
         viewModelScope.launch {
             repository.unmarkOrderScanned(orderId)
+        }
+    }
+
+    fun markOrderPacked(orderId: Long) {
+        viewModelScope.launch {
+            repository.markOrderPacked(orderId)
+        }
+    }
+
+    fun unmarkOrderPacked(orderId: Long) {
+        viewModelScope.launch {
+            repository.unmarkOrderPacked(orderId)
         }
     }
 
@@ -91,13 +129,28 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
             _uiState.update { it.copy(scanResult = null) }
             when (val result = repository.scanWbSticker(stickerData)) {
                 is ScanResult.Success -> {
+                    val order = result.order
+                    // Считаем сколько собрано по группе этого артикула+размера
+                    val groupOrders = newOrders.value.filter {
+                        it.article == order.article && it.size == order.size
+                    }
+                    val groupScanned = groupOrders.count { it.scannedAt != null }
+                    val groupTotal = groupOrders.size
+                    val onDevice = newOrders.value.count { it.scannedAt != null }
+                    val onServer = newOrders.value.count { it.isSynced }
                     _uiState.update {
                         it.copy(
                             scanResult = ScanUiResult.Success(
-                                orderId = result.order.id,
-                                article = result.order.article,
-                                size = result.order.size,
-                                requiresSgtin = result.order.isMarked
+                                orderId = order.id,
+                                article = order.article,
+                                name = order.name,
+                                size = order.size,
+                                requiresSgtin = order.isMarked,
+                                groupScanned = groupScanned,
+                                groupTotal = groupTotal,
+                                cargoType = order.cargoType,
+                                onDevice = onDevice,
+                                onServer = onServer
                             )
                         )
                     }
@@ -145,13 +198,27 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
             _uiState.update { it.copy(scanResult = null) }
             when (val result = repository.scanBarcode(barcode)) {
                 is ScanResult.Success -> {
+                    val order = result.order
+                    val groupOrders = newOrders.value.filter {
+                        it.article == order.article && it.size == order.size
+                    }
+                    val groupScanned = groupOrders.count { it.scannedAt != null }
+                    val groupTotal = groupOrders.size
+                    val onDevice = newOrders.value.count { it.scannedAt != null }
+                    val onServer = newOrders.value.count { it.isSynced }
                     _uiState.update {
                         it.copy(
                             scanResult = ScanUiResult.Success(
-                                orderId = result.order.id,
-                                article = result.order.article,
-                                size = result.order.size,
-                                requiresSgtin = result.order.isMarked
+                                orderId = order.id,
+                                article = order.article,
+                                name = order.name,
+                                size = order.size,
+                                requiresSgtin = order.isMarked,
+                                groupScanned = groupScanned,
+                                groupTotal = groupTotal,
+                                cargoType = order.cargoType,
+                                onDevice = onDevice,
+                                onServer = onServer
                             )
                         )
                     }
@@ -217,13 +284,27 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
         viewModelScope.launch {
             when (val result = repository.scanKiz(kizString)) {
                 is KizScanResult.Success -> {
+                    val order = result.order
+                    val groupOrders = newOrders.value.filter {
+                        it.article == order.article && it.size == order.size
+                    }
+                    val groupScanned = groupOrders.count { it.scannedAt != null }
+                    val groupTotal = groupOrders.size
+                    val onDevice = newOrders.value.count { it.scannedAt != null }
+                    val onServer = newOrders.value.count { it.isSynced }
                     _uiState.update {
                         it.copy(
                             scanResult = ScanUiResult.Success(
-                                orderId = result.order.id,
-                                article = result.order.article,
-                                size = result.order.size,
-                                requiresSgtin = result.order.isMarked
+                                orderId = order.id,
+                                article = order.article,
+                                name = order.name,
+                                size = order.size,
+                                requiresSgtin = order.isMarked,
+                                groupScanned = groupScanned,
+                                groupTotal = groupTotal,
+                                cargoType = order.cargoType,
+                                onDevice = onDevice,
+                                onServer = onServer
                             ),
                             sgtinSaved = true
                         )
@@ -308,6 +389,30 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
                     }
                 }
         }
+    }
+
+    fun getSupplyQr(supplyId: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, error = null) }
+            repository.getSupplyBarcode(supplyId)
+                .onSuccess { barcodeResp ->
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            supplyQrSvg = barcodeResp.file
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(isLoading = false, error = error.message)
+                    }
+                }
+        }
+    }
+
+    fun clearSupplyQr() {
+        _uiState.update { it.copy(supplyQrSvg = null) }
     }
 }
 

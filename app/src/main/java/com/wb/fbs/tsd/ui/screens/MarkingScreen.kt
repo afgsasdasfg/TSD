@@ -197,8 +197,19 @@ private fun MarkingItemCard(item: OrderItem, onKizScanned: (String) -> Unit) {
 
                     Spacer(modifier = Modifier.height(4.dp))
 
+                    // Размер — отдельно и крупно: важен для выбора нужной единицы
+                    // при вводе КИЗ, по штрихкоду никто не ориентируется.
+                    if (item.size.isNotBlank()) {
+                        Text(
+                            text = "Размер: ${item.size}",
+                            fontSize = TextSizeLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = WarningOrange
+                        )
+                    }
+
                     Text(
-                        text = "Арт: ${item.article} | ${item.color} | ${item.size}",
+                        text = "Арт: ${item.article} | ${item.color}",
                         fontSize = TextSizeSmall,
                         color = OnDarkSecondary
                     )
@@ -261,6 +272,15 @@ private fun MarkingItemCard(item: OrderItem, onKizScanned: (String) -> Unit) {
             },
             text = {
                 Column {
+                    if (item.size.isNotBlank()) {
+                        Text(
+                            text = "Размер: ${item.size}",
+                            fontSize = TextSizeExtraLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = WarningOrange
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
                     Text(
                         text = "Артикул: ${item.article} (${item.name})",
                         fontSize = TextSizeSmall,

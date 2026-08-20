@@ -1,9 +1,7 @@
 package com.wb.fbs.tsd.data.db
 
-import androidx.room.*
-import androidx.room.migration.Migration
-import androidx.sqlite.db.SupportSQLiteDatabase
-
+import androidx.room.Database
+import androidx.room.RoomDatabase
 @Database(
     entities = [
         OrderEntity::class,
@@ -12,25 +10,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ScanLogEntity::class,
         SettingsEntity::class
     ],
-    version = 2, // v2: добавлены stickerBarcode/stickerPartA/stickerPartB в OrderEntity
+    version = 4,
     exportSchema = false
 )
-@TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun orderDao(): OrderDao
     abstract fun supplyDao(): SupplyDao
     abstract fun scanLogDao(): ScanLogDao
     abstract fun settingsDao(): SettingsDao
-}
-
-class Converters {
-    @TypeConverter
-    fun fromTimestamp(value: Long?): java.time.Instant? {
-        return value?.let { java.time.Instant.ofEpochMilli(it) }
-    }
-
-    @TypeConverter
-    fun instantToTimestamp(instant: java.time.Instant?): Long? {
-        return instant?.toEpochMilli()
-    }
 }

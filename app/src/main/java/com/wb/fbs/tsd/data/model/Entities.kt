@@ -32,7 +32,8 @@ data class OrderEntity(
     val isMarked: Boolean,     // Требуется маркировка
     val sgtin: String?,        // Закреплённый КИЗ
     val isSynced: Boolean,     // Синхронизировано с WB
-    val scannedAt: Long?,      // Когда отсканирован на ТСД
+    val scannedAt: Long?,      // Когда собран на ТСД (этап 1)
+    val packedAt: Long? = null,  // Когда упакован (этап 2)
     val stickerPrinted: Boolean,// Стикер распечатан
     // Код со стикера заказа (WbStickerDto из POST /api/v3/orders/stickers).
     // Уникален на конкретный заказ — в отличие от barcode товара, который

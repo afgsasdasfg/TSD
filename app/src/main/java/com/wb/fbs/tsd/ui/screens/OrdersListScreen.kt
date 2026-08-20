@@ -188,6 +188,11 @@ private fun OrderCard(order: OrderEntity, onClick: () -> Unit) {
                         fontWeight = FontWeight.Bold,
                         color = OnDarkPrimary
                     )
+                    Text(
+                        text = order.name,
+                        fontSize = TextSizeMedium,
+                        color = OnDarkSecondary
+                    )
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically

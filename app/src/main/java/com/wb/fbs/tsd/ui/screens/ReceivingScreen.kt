@@ -225,7 +225,11 @@ private fun ProductItemCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(product.name, fontSize = TextSizeMedium, fontWeight = FontWeight.Bold, color = OnDarkPrimary)
-                    Text("Арт: ${product.article} | ${product.color} | ${product.size}", fontSize = TextSizeSmall, color = OnDarkSecondary)
+                    // Размер — отдельно и крупно, по штрихкоду никто не ориентируется
+                    if (product.size.isNotBlank() && product.size != "Универсальный") {
+                        Text("Размер: ${product.size}", fontSize = TextSizeLarge, fontWeight = FontWeight.Bold, color = WarningOrange)
+                    }
+                    Text("Арт: ${product.article} | ${product.color}", fontSize = TextSizeSmall, color = OnDarkSecondary)
                     Text("Штрихкод: ${product.barcode}", fontSize = TextSizeSmall, color = OnDarkDisabled)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {

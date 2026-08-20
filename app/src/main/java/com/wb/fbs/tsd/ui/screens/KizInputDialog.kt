@@ -38,11 +38,25 @@ fun KizInputDialog(
                     color = OnDarkPrimary
                 )
 
-                // Инфо о товаре
+                // Инфо о товаре. Размер — главный ориентир кладовщика при выборе товара
+                // для ввода КИЗ — по штрихкоду никто не ориентируется.
+                if (order.size != null) {
+                    Text(
+                        "Размер: ${order.size}",
+                        fontSize = TextSizeExtraLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = WarningOrange
+                    )
+                }
                 Text(
                     "Артикул: ${order.article}",
                     fontSize = TextSizeMedium,
                     color = OnDarkPrimary
+                )
+                Text(
+                    order.name,
+                    fontSize = TextSizeMedium,
+                    color = OnDarkSecondary
                 )
                 Text(
                     "Штрихкод: ${order.barcode ?: "—"}",
