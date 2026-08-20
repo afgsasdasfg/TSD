@@ -501,6 +501,10 @@ class WbRepository(
         if (byPartA != null) {
             return finishStickerScan(byPartA)
         }
+        val byPartB = allOrders.find { it.stickerPartB != null && it.stickerPartB == trimmed }
+        if (byPartB != null) {
+            return finishStickerScan(byPartB)
+        }
 
         // 3. Деградация: если stickerBarcode ещё не подтянут (syncMissingStickers()
         // не выполнялся) — пробуем распознать голый orderId в отсканированной строке.
@@ -511,6 +515,24 @@ class WbRepository(
                 return finishStickerScan(order)
             }
         }
+
+        // 4. Last resort: стикеры не скачаны — тянем с WB API и повторяем поиск.
+        try {
+            syncMissingStickers()
+            val retryByBarcode = orderDao.getOrderByStickerBarcode(trimmed)
+            if (retryByBarcode != null) {
+                return finishStickerScan(retryByBarcode)
+            }
+            val retryOrders = orderDao.getNewOrders().first()
+            val retryByPartA = retryOrders.find { it.stickerPartA != null && it.stickerPartA == trimmed }
+            if (retryByPartA != null) {
+                return finishStickerScan(retryByPartA)
+            }
+            val retryByPartB = retryOrders.find { it.stickerPartB != null && it.stickerPartB == trimmed }
+            if (retryByPartB != null) {
+                return finishStickerScan(retryByPartB)
+            }
+        } catch (_: Throwable) {}
 
         scanLogDao.insert(
             ScanLogEntity(
