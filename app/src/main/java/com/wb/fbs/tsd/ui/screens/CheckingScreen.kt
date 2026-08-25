@@ -32,6 +32,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.wb.fbs.tsd.data.model.Order
 import com.wb.fbs.tsd.data.model.OrderItem
 import com.wb.fbs.tsd.ui.theme.*
+import com.wb.fbs.tsd.utils.clipboardScanner
 import androidx.compose.ui.unit.sp
 
 /**
@@ -51,6 +52,13 @@ fun CheckingScreen(
     val checkedItems = order.items.sumOf { it.scannedQuantity }
     val progress = if (totalItems > 0) checkedItems.toFloat() / totalItems else 0f
     val isComplete = progress >= 1.0f
+
+    // ТСД-сканер копирует штрихкод в буфер — подхватываем
+    clipboardScanner { code: String ->
+        if (code.isNotBlank()) {
+            onBarcodeScanned(code)
+        }
+    }
 
     Column(
         modifier = Modifier

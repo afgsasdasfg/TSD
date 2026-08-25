@@ -2,6 +2,7 @@ package com.wb.fbs.tsd.ui.viewmodel
 
 import com.wb.fbs.tsd.data.db.OrderDao
 import com.wb.fbs.tsd.data.repository.ApiException
+import com.wb.fbs.tsd.data.repository.CrptRepository
 import com.wb.fbs.tsd.data.repository.WbRepository
 import kotlinx.coroutines.delay
 import androidx.lifecycle.ViewModel
@@ -9,6 +10,8 @@ import androidx.lifecycle.viewModelScope
 import com.wb.fbs.tsd.data.db.OrderEntity
 import com.wb.fbs.tsd.data.repository.KizScanResult
 import com.wb.fbs.tsd.data.repository.ScanResult
+import com.wb.fbs.tsd.data.network.CrptRetireKizResponse
+import com.wb.fbs.tsd.data.network.CrptReturnKizResponse
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -22,8 +25,25 @@ data class OrdersUiState(
     val createdSupplyId: String? = null,
     val kizValidation: KizValidationUiResult? = null,
     val supplyQrSvg: String? = null,
-    val supplyStage: Int = 0  // 0=сборка, 1=грузоместа, 2=передача
+    val supplyStage: Int = 0,  // 0=сборка, 1=грузоместа, 2=передача
+    val crptHealth: Boolean? = null,  // null=не проверено, true=ок, false=заблокирован
+    val crptTokenValid: Boolean? = null,  // токен ЧЗ авторизован?
+    val kizCheckResult: KizCheckUiResult? = null  // результат проверки КИЗ через ЧЗ
 )
+
+sealed class KizCheckUiResult {
+    data class Valid(
+        val cis: String,
+        val status: String,
+        val statusDescription: String,
+        val productName: String,
+        val verified: Boolean
+    ) : KizCheckUiResult()
+    data class Invalid(val cis: String, val error: String) : KizCheckUiResult()
+    data class Error(val message: String) : KizCheckUiResult()
+    data class Retired(val cis: String) : KizCheckUiResult()
+    data class Returned(val cis: String) : KizCheckUiResult()
+}
 
 sealed class ScanUiResult {
     data class Success(
@@ -42,7 +62,10 @@ sealed class ScanUiResult {
     data class Error(val message: String) : ScanUiResult()
 }
 
-class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
+class OrdersViewModel(
+    private val repository: WbRepository,
+    private val crptRepository: CrptRepository? = null
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(OrdersUiState())
     val uiState: StateFlow<OrdersUiState> = _uiState.asStateFlow()
@@ -120,7 +143,34 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
 
     fun syncOrderStatuses() {
         viewModelScope.launch {
+            // До синхронизации: запоминаем заказы с КИЗ (sgtin),
+            // которые ещё не complete/cancel — чтобы после узнать какие перешли.
+            val beforeOrders = repository.getActiveOrdersWithSgtin()
+            val beforeActive = beforeOrders
+                .filter { it.status != "complete" && it.status != "cancel" }
+                .map { it.id }
+                .toSet()
+
             repository.syncOrderStatuses()
+
+            // После: находим заказы которые стали complete или cancel и имеют sgtin
+            val afterOrders = repository.getActiveOrdersWithSgtin()
+
+            // Авто-вывод при complete (продажа)
+            val newlyComplete = afterOrders.filter {
+                it.status == "complete" && it.id in beforeActive && !it.sgtin.isNullOrEmpty()
+            }
+            for (order in newlyComplete) {
+                autoRetireOrderKiz(order)
+            }
+
+            // Авто-возврат при cancel (возврат товара)
+            val newlyCancelled = afterOrders.filter {
+                it.status == "cancel" && it.id in beforeActive && !it.sgtin.isNullOrEmpty()
+            }
+            for (order in newlyCancelled) {
+                autoReturnOrderKiz(order)
+            }
         }
     }
 
@@ -413,6 +463,198 @@ class OrdersViewModel(private val repository: WbRepository) : ViewModel() {
 
     fun clearSupplyQr() {
         _uiState.update { it.copy(supplyQrSvg = null) }
+    }
+
+    // ==================== ЧЕСТНЫЙ ЗНАК (ЧЗ) ====================
+
+    /**
+     * Проверка kill switch / лицензии ЧЗ-сервера.
+     * Вызывать при старте и перед КИЗ-операциями.
+     */
+    fun checkCrptHealth() {
+        viewModelScope.launch {
+            val healthy = crptRepository?.checkHealth() ?: false
+            _uiState.update { it.copy(crptHealth = healthy) }
+        }
+    }
+
+    /**
+     * Проверка статуса токена ЧЗ (авторизован ли Алекс через КриптоПро).
+     */
+    fun checkCrptAuthStatus() {
+        viewModelScope.launch {
+            val result = crptRepository?.getAuthStatus()
+            _uiState.update {
+                it.copy(crptTokenValid = result?.getOrNull() ?: false)
+            }
+        }
+    }
+
+    /**
+     * Проверка КИЗ через сервер ЧЗ.
+     * Отправляет cis на /api/check-kiz, получает статус КИЗ.
+     */
+    fun checkKizOnServer(cis: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(kizCheckResult = null) }
+            val result = crptRepository?.checkKiz(cis)
+            if (result == null) {
+                _uiState.update {
+                    it.copy(kizCheckResult = KizCheckUiResult.Error("ЧЗ-сервер не инициализирован"))
+                }
+                return@launch
+            }
+            result.onSuccess { response ->
+                if (response.valid) {
+                    _uiState.update {
+                        it.copy(kizCheckResult = KizCheckUiResult.Valid(
+                            cis = response.cis ?: cis,
+                            status = response.status ?: "UNKNOWN",
+                            statusDescription = response.statusDescription ?: "",
+                            productName = response.productName ?: "",
+                            verified = response.verified ?: false
+                        ))
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(kizCheckResult = KizCheckUiResult.Invalid(
+                            cis = cis,
+                            error = response.error ?: "КИЗ невалиден"
+                        ))
+                    }
+                }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(kizCheckResult = KizCheckUiResult.Error(error.message ?: "Ошибка ЧЗ"))
+                }
+            }
+        }
+    }
+
+    /**
+     * Вывод КИЗ из оборота через сервер ЧЗ.
+     */
+    fun retireKizOnServer(cis: String, reason: String = "RETAIL") {
+        viewModelScope.launch {
+            _uiState.update { it.copy(kizCheckResult = null) }
+            val result = crptRepository?.retireKiz(cis, reason)
+            if (result == null) {
+                _uiState.update {
+                    it.copy(kizCheckResult = KizCheckUiResult.Error("ЧЗ-сервер не инициализирован"))
+                }
+                return@launch
+            }
+            result.onSuccess { response: CrptRetireKizResponse ->
+                if (response.retired) {
+                    _uiState.update {
+                        it.copy(kizCheckResult = KizCheckUiResult.Retired(cis))
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(kizCheckResult = KizCheckUiResult.Invalid(
+                            cis = cis,
+                            error = response.error ?: "Не удалось вывести КИЗ"
+                        ))
+                    }
+                }
+            }.onFailure { error: Throwable ->
+                _uiState.update {
+                    it.copy(kizCheckResult = KizCheckUiResult.Error(error.message ?: "Ошибка ЧЗ"))
+                }
+            }
+        }
+    }
+
+    /**
+     * Возврат КИЗ в оборот через сервер ЧЗ (возврат товара).
+     */
+    fun returnKizOnServer(cis: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(kizCheckResult = null) }
+            val result = crptRepository?.returnKiz(cis)
+            if (result == null) {
+                _uiState.update {
+                    it.copy(kizCheckResult = KizCheckUiResult.Error("ЧЗ-сервер не инициализирован"))
+                }
+                return@launch
+            }
+            result.onSuccess { response: CrptReturnKizResponse ->
+                if (response.returned) {
+                    _uiState.update {
+                        it.copy(kizCheckResult = KizCheckUiResult.Returned(cis))
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(kizCheckResult = KizCheckUiResult.Invalid(
+                            cis = cis,
+                            error = response.error ?: "Не удалось вернуть КИЗ"
+                        ))
+                    }
+                }
+            }.onFailure { error: Throwable ->
+                _uiState.update {
+                    it.copy(kizCheckResult = KizCheckUiResult.Error(error.message ?: "Ошибка ЧЗ"))
+                }
+            }
+        }
+    }
+
+    /**
+     * Авто-вывод КИЗ из оборота при продаже.
+     * Вызывается когда заказ становится complete (продан).
+     * Тихо выводит КИЗ в фон, ошибки не блокируют UI.
+     */
+    fun autoRetireOrderKiz(order: OrderEntity) {
+        val sgtin = order.sgtin
+        if (sgtin.isNullOrEmpty()) return
+        viewModelScope.launch {
+            try {
+                val crpt = crptRepository ?: return@launch
+                val result = crpt.retireKiz(sgtin)
+                result.onSuccess { resp ->
+                    if (resp.retired) {
+                        android.util.Log.i("OrdersVM", "Авто-вывод КИЗ: ${sgtin.take(20)}... OK")
+                    } else {
+                        android.util.Log.w("OrdersVM", "Авто-вывод КИЗ: не выведен — ${resp.error}")
+                    }
+                }.onFailure { e ->
+                    android.util.Log.w("OrdersVM", "Авто-вывод КИЗ не удался: ${e.message}")
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("OrdersVM", "Авто-вывод КИЗ exception: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Авто-возврат КИЗ в оборот при возврате товара.
+     * Вызывается когда заказ возвращается (cancel).
+     * Тихо возвращает КИЗ в фон, ошибки не блокируют UI.
+     */
+    fun autoReturnOrderKiz(order: OrderEntity) {
+        val sgtin = order.sgtin
+        if (sgtin.isNullOrEmpty()) return
+        viewModelScope.launch {
+            try {
+                val crpt = crptRepository ?: return@launch
+                val result = crpt.returnKiz(sgtin)
+                result.onSuccess { resp ->
+                    if (resp.returned) {
+                        android.util.Log.i("OrdersVM", "Авто-возврат КИЗ: ${sgtin.take(20)}... OK")
+                    } else {
+                        android.util.Log.w("OrdersVM", "Авто-возврат КИЗ: не возвращён — ${resp.error}")
+                    }
+                }.onFailure { e ->
+                    android.util.Log.w("OrdersVM", "Авто-возврат КИЗ не удался: ${e.message}")
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("OrdersVM", "Авто-возврат КИЗ exception: ${e.message}")
+            }
+        }
+    }
+
+    fun clearKizCheckResult() {
+        _uiState.update { it.copy(kizCheckResult = null) }
     }
 }
 

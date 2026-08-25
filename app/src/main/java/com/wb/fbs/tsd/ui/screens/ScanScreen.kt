@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.wb.fbs.tsd.ui.theme.*
 import com.wb.fbs.tsd.utils.VghLimits
+import com.wb.fbs.tsd.utils.clipboardScanner
 import kotlinx.coroutines.delay
 
 /**
@@ -66,6 +67,17 @@ fun ScanScreen(
 
     // Авто-фокус при входе — ТСД-сканер печатает в поле
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    // ТСД-сканер копирует штрихкод в буфер — подхватываем автоматически
+    clipboardScanner { code: String ->
+        if (code.isNotBlank()) {
+            if (scanMode == "sgtin" && scannedOrderId != null) {
+                onSgtinScanned(scannedOrderId, code)
+            } else {
+                submitScan(code, scanMode, onBarcodeScanned, onSgtinScanned, onStickerScanned)
+            }
+        }
+    }
 
     // Восстановление фокуса после сброса результата
     LaunchedEffect(article, scanError, sgtinSaved) {

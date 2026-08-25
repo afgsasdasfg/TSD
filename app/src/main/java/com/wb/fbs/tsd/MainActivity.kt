@@ -62,6 +62,7 @@ fun TsdApp() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val app = remember { TsdApplication.instance }
     val repository = remember { app.repository }
+    val crptRepository = remember { app.crptRepository }
 
     val prefs = remember { context.getSharedPreferences("wb_prefs", android.content.Context.MODE_PRIVATE) }
     val token = remember { prefs.getString("api_token", null) }
@@ -79,11 +80,16 @@ fun TsdApp() {
     }
 
     val viewModel: OrdersViewModel = viewModel(
-        factory = OrdersViewModelFactory(repository)
+        factory = OrdersViewModelFactory(repository, crptRepository)
     )
 
     val uiState by viewModel.uiState.collectAsState()
     val orders by viewModel.newOrders.collectAsState()
+
+    // Проверка kill switch ЧЗ-сервера при старте
+    LaunchedEffect(Unit) {
+        viewModel.checkCrptHealth()
+    }
 
     // Показываем Toast при восстановлении интернета
     var wasOffline by remember { mutableStateOf(false) }

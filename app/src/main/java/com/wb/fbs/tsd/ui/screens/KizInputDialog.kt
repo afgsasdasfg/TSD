@@ -10,6 +10,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.wb.fbs.tsd.data.db.OrderEntity
 import com.wb.fbs.tsd.ui.theme.*
+import com.wb.fbs.tsd.utils.clipboardScanner
 
 @Composable
 fun KizInputDialog(
@@ -19,6 +20,14 @@ fun KizInputDialog(
 ) {
     var kizInput by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+
+    // ТСД-сканер копирует КИЗ в буфер — подхватываем автоматически
+    clipboardScanner { code: String ->
+        if (code.isNotBlank()) {
+            kizInput = code.trim()
+            error = null
+        }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(

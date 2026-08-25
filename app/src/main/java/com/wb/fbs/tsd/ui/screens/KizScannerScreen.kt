@@ -33,6 +33,7 @@ import com.wb.fbs.tsd.ui.theme.*
 import com.wb.fbs.tsd.utils.KizParser
 import com.wb.fbs.tsd.utils.KizValidationResult
 import com.wb.fbs.tsd.utils.ScanFeedback
+import com.wb.fbs.tsd.utils.clipboardScanner
 import java.util.concurrent.Executors
 
 @Composable
@@ -53,6 +54,15 @@ fun KizScannerScreen(
 
     var scannedKiz by remember { mutableStateOf<String?>(null) }
     var isScanning by remember { mutableStateOf(true) }
+
+    // ТСД-сканер копирует КИЗ в буфер — подхватываем
+    clipboardScanner { code: String ->
+        if (isScanning && scannedKiz == null && KizParser.isValidKizFormat(code)) {
+            scannedKiz = code
+            isScanning = false
+            ScanFeedback.success(context)
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()

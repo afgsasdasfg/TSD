@@ -9,7 +9,9 @@ import android.util.Log
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.wb.fbs.tsd.data.db.AppDatabase
+import com.wb.fbs.tsd.data.network.CrptApiClient
 import com.wb.fbs.tsd.data.network.WbApiClient
+import com.wb.fbs.tsd.data.repository.CrptRepository
 import com.wb.fbs.tsd.data.repository.WbRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +40,9 @@ class TsdApplication : Application() {
     lateinit var repository: WbRepository
         private set
 
+    lateinit var crptRepository: CrptRepository
+        private set
+
     override fun onCreate() {
         super.onCreate()
 
@@ -55,6 +60,10 @@ class TsdApplication : Application() {
             supplyDao = database.supplyDao(),
             scanLogDao = database.scanLogDao()
         )
+
+        // ЧЗ-сервер (Честный ЗНАК)
+        CrptApiClient.init()
+        crptRepository = CrptRepository()
 
         // ВОССТАНАВЛИВАЕМ API ПРИ СТАРТЕ
         val prefs = getSharedPreferences("wb_prefs", MODE_PRIVATE)

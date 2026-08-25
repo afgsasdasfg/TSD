@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.wb.fbs.tsd.data.model.Product
 import com.wb.fbs.tsd.ui.theme.*
+import com.wb.fbs.tsd.utils.clipboardScanner
 
 @Composable
 fun ReceivingScreen(
@@ -35,6 +36,37 @@ fun ReceivingScreen(
     var selectedProductId by remember { mutableStateOf<String?>(null) }
 
     val selectedProduct = selectedProductId?.let { pid -> products.find { it.id == pid } }
+
+    // ТСД-сканер копирует код в буфер — подхватываем автоматически
+    clipboardScanner { code: String ->
+        when (scanMode) {
+            "barcode" -> {
+                if (code.isNotBlank()) {
+                    onProductAdded(Product(
+                        id = "PRD-${System.currentTimeMillis()}",
+                        article = "", name = "Товар #${products.size + 1}",
+                        color = "Не указан", size = "Универсальный",
+                        barcode = code, requiresMarking = true
+                    ))
+                }
+            }
+            "kiz" -> {
+                if (code.isNotBlank() && code.startsWith("4B")) {
+                    if (selectedProductId != null) {
+                        onAddKizToProduct(selectedProductId!!, code)
+                    } else {
+                        onProductAdded(Product(
+                            id = "PRD-${System.currentTimeMillis()}",
+                            article = "", name = "Товар #${products.size + 1}",
+                            color = "Не указан", size = "Универсальный",
+                            barcode = code.substring(0 until minOf(27, code.length)),
+                            requiresMarking = true, kizCodes = listOf(code)
+                        ))
+                    }
+                }
+            }
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().background(DarkBackground).padding(16.dp)

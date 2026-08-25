@@ -66,46 +66,24 @@ class WbRepository(
     suspend fun getOrderById(orderId: Long): OrderEntity? = orderDao.getOrderById(orderId)
 
     suspend fun syncNewOrders(): kotlin.Result<Int> {
-        // 1. Тянем новые заказы через /api/v3/orders/new
+        // Тянем новые заказы через /api/v3/orders/new
+        // Это отдаёт только status=new — то что нужно для вкладки «Заказы FBS».
+        // Заказы, переведённые в confirm на портале, уже в БД — syncOrderStatuses()
+        // обновит их статус. Не тянем all=1000 заказов — это пустая трата лимитов WB.
         val newCount = safeApiCall { requireApi().getNewOrders() }.map { response ->
             val serverOrders = response.orders?.map { it.toEntity() } ?: emptyList()
             orderDao.insertOrders(serverOrders)
             serverOrders.size
         }.getOrElse { 0 }
 
-        // Пауза между запросами — WB rate limit ~100 req/min
+        // Пауза перед обновлением статусов
         delay(700)
 
-        // 2. Тянем ВСЕ заказы за период через /api/v3/orders —
-        //    /orders/new отдаёт только status=new. Заказы, переведённые
-        //    в «на сборке» (confirm) на портале, не попадают в /orders/new.
-        //    /api/v3/orders отдаёт все заказы (new, confirm, complete, cancel)
-        //    с пагинацией по 1000. Тянем только первую страницу —
-        //    для склада этого достаточно (недавние заказы).
-        var confirmCount = 0
-        try {
-            val allResponse = requireApi().getOrders(limit = 1000, next = 0)
-            if (allResponse.isSuccessful) {
-                val allOrders = allResponse.body()?.orders ?: emptyList()
-                // Сохраняем только new и confirm — complete/cancel не нужны
-                val relevant = allOrders.filter {
-                    it.supplierStatus == null || it.supplierStatus == "new" || it.supplierStatus == "confirm"
-                }
-                // toEntity() ставит status="new" по умолчанию; supplierStatus
-                // придёт из /api/v3/orders/status — обновится через syncOrderStatuses()
-                orderDao.insertOrders(relevant.map { it.toEntity() })
-                confirmCount = relevant.size
-            }
-        } catch (_: Throwable) {}
-
-        // Пауза перед статусами
-        delay(700)
-
-        // 3. Обновляем статусы (new → confirm → complete…)
-        //    syncOrderStatuses() внутри вызывает syncMissingStickers()
+        // Обновляем статусы уже существующих в БД заказов (new → confirm → complete…)
+        // syncOrderStatuses() внутри вызывает syncMissingStickers()
         try { syncOrderStatuses() } catch (_: Throwable) {}
 
-        return kotlin.Result.success(newCount + confirmCount)
+        return kotlin.Result.success(newCount)
     }
 
     suspend fun createSupply(name: String): kotlin.Result<String> = safeApiCall {
@@ -431,6 +409,10 @@ class WbRepository(
     }
 
     suspend fun getUnsyncedOrders(): List<OrderEntity> = orderDao.getUnsyncedOrders()
+
+    /** Активные заказы с привязанным КИЗ (sgtin) — для авто-вывода/возврата. */
+    suspend fun getActiveOrdersWithSgtin(): List<OrderEntity> =
+        orderDao.getActiveOrdersWithSgtin()
     suspend fun markOrderScanned(orderId: Long) {
         orderDao.markOrderScanned(orderId, System.currentTimeMillis())
     }
