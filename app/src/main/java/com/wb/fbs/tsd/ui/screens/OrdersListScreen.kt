@@ -177,6 +177,11 @@ fun OrderListScreen(
             )
         }
 
+        // === Фильтр: confirm сверху, остальные под кнопкой ===
+        val confirmOrders = orders.filter { it.status == "confirm" }
+        val otherOrders = orders.filter { it.status != "confirm" }
+        var showOtherOrders by remember { mutableStateOf(false) }
+
         Spacer(modifier = Modifier.height(8.dp))
 
         if (showKizDialog && selectedOrder != null) {
@@ -198,7 +203,18 @@ fun OrderListScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            items(orders, key = { it.id }) { order ->
+            // === Confirm заказы (основные) ===
+            if (confirmOrders.isEmpty()) {
+                item {
+                    Text(
+                        text = "Нет заказов на сборке",
+                        fontSize = TextSizeMedium,
+                        color = OnDarkSecondary,
+                        modifier = Modifier.padding(vertical = 16.dp)
+                    )
+                }
+            }
+            items(confirmOrders, key = { it.id }) { order ->
                 OrderCard(
                     order = order,
                     onClick = {
@@ -210,6 +226,38 @@ fun OrderListScreen(
                         }
                     }
                 )
+            }
+
+            // === Остальные заказы (под кнопкой) ===
+            if (otherOrders.isNotEmpty()) {
+                item {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(
+                        onClick = { showOtherOrders = !showOtherOrders },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = if (showOtherOrders) "▼ Скрыть остальные (${otherOrders.size})" else "▶ Показать остальные (${otherOrders.size})",
+                            fontSize = TextSizeMedium,
+                            color = OnDarkSecondary
+                        )
+                    }
+                }
+                if (showOtherOrders) {
+                    items(otherOrders, key = { it.id }) { order ->
+                        OrderCard(
+                            order = order,
+                            onClick = {
+                                if (order.isMarked && order.sgtin.isNullOrBlank()) {
+                                    selectedOrder = order
+                                    showKizDialog = true
+                                } else {
+                                    onOrderClick(order)
+                                }
+                            }
+                        )
+                    }
+                }
             }
         }
     }

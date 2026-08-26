@@ -75,11 +75,61 @@ class OrdersViewModel(
 
     init {
         // Автосинхронизация при старте — только если есть API.
-        // loadOrders() обёрнут в try/catch: если WB API недоступен
-        // или токен протух, приложение не должно падать при запуске.
-        // Пользователь увидит ошибку в UI, а не краш.
         if (repository.hasApi) {
             loadOrders()
+        }
+
+        // Фоновая предзагрузка confirm стикеров + авто-синхронизация раз в час.
+        // Предзагрузка через 10с после старта (после основного sync),
+        // затем каждый час — чтобы стикеры были в БД до сканирования.
+        viewModelScope.launch {
+            while (true) {
+                delay(5_000L) // первая задержка 5с, потом 10 мин
+                if (repository.hasApi) {
+                    try {
+                        android.util.Log.i("OrdersVM", "Background: prefetch + sync...")
+                        _uiState.update { it.copy(error = "Синхронизация: загрузка заказов...") }
+                        repository.syncNewOrders()
+                        _uiState.update { it.copy(error = "Синхронизация: загрузка стикеров...") }
+                        repository.prefetchConfirmStickers()
+                        _uiState.update { it.copy(error = null) }
+                        android.util.Log.i("OrdersVM", "Background: done")
+                    } catch (e: Throwable) {
+                        android.util.Log.w("OrdersVM", "Background failed: ${e.message}")
+                        _uiState.update { it.copy(error = null) }
+                    }
+                }
+                delay(10 * 60 * 1000L) // 10 мин до следующего цикла
+            }
+        }
+    }
+
+    fun downloadStickersManual() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, error = null) }
+            try {
+                val result = repository.syncMissingStickers()
+                result.onSuccess { count ->
+                    val stats = repository.getDbStats()
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            lastSyncCount = count,
+                            lastSyncTime = System.currentTimeMillis(),
+                            error = if (count == 0) "Нет заказов без стикеров. $stats" else "Скачано стикеров: $count. $stats"
+                        )
+                    }
+                }.onFailure { e ->
+                    val stats = try { repository.getDbStats() } catch (_: Throwable) { "" }
+                    _uiState.update {
+                        it.copy(isLoading = false, error = "Ошибка стикеров: ${e.message}. $stats")
+                    }
+                }
+            } catch (e: Throwable) {
+                _uiState.update {
+                    it.copy(isLoading = false, error = "Ошибка: ${e.message}")
+                }
+            }
         }
     }
 
@@ -104,6 +154,11 @@ class OrdersViewModel(
                                 lastSyncTime = System.currentTimeMillis()
                             )
                         }
+                        // Показываем статистику БД для отладки стикеров
+                        try {
+                            val stats = repository.getDbStats()
+                            _uiState.update { it.copy(error = stats) }
+                        } catch (_: Throwable) {}
                     }
                     .onFailure { error ->
                         val message = when (error) {
@@ -176,7 +231,7 @@ class OrdersViewModel(
 
     fun scanWbSticker(stickerData: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(scanResult = null) }
+            _uiState.update { it.copy(scanResult = null, isLoading = true, error = "Поиск стикера: $stickerData...") }
             when (val result = repository.scanWbSticker(stickerData)) {
                 is ScanResult.Success -> {
                     val order = result.order
@@ -190,6 +245,8 @@ class OrdersViewModel(
                     val onServer = newOrders.value.count { it.isSynced }
                     _uiState.update {
                         it.copy(
+                            isLoading = false,
+                            error = null,
                             scanResult = ScanUiResult.Success(
                                 orderId = order.id,
                                 article = order.article,
@@ -206,10 +263,10 @@ class OrdersViewModel(
                     }
                 }
                 is ScanResult.NotFound -> {
-                    _uiState.update { it.copy(scanResult = ScanUiResult.NotFound) }
+                    _uiState.update { it.copy(isLoading = false, scanResult = ScanUiResult.NotFound) }
                 }
                 is ScanResult.Error -> {
-                    _uiState.update { it.copy(scanResult = ScanUiResult.Error(result.message)) }
+                    _uiState.update { it.copy(isLoading = false, scanResult = ScanUiResult.Error(result.message)) }
                 }
             }
         }

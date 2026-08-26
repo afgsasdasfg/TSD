@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import com.wb.fbs.tsd.ui.theme.*
 import com.wb.fbs.tsd.utils.VghLimits
 import com.wb.fbs.tsd.utils.clipboardScanner
@@ -64,6 +65,7 @@ fun ScanScreen(
     var scanMode by rememberSaveable { mutableStateOf("sticker") }
     var input by remember { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     // Авто-фокус при входе — ТСД-сканер печатает в поле
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -102,7 +104,7 @@ fun ScanScreen(
             submitScan(input, scanMode, onBarcodeScanned, onSgtinScanned, onStickerScanned)
         }
         input = ""
-        focusRequester.requestFocus()
+        keyboardController?.hide()
     }
 
     Column(

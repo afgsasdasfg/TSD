@@ -3,9 +3,11 @@ package com.wb.fbs.tsd.data.db
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
+data class StatusCount(val status: String, val cnt: Int)
+
 @Dao
 interface OrderDao {
-    @Query("SELECT * FROM orders WHERE status = 'new' ORDER BY createdAt DESC")
+    @Query("SELECT * FROM orders WHERE status IN ('new', 'confirm') ORDER BY createdAt DESC")
     fun getNewOrders(): Flow<List<OrderEntity>>
 
     @Query("SELECT * FROM orders WHERE supplyId = :supplyId ORDER BY article, size")
@@ -17,7 +19,7 @@ interface OrderDao {
     @Query("SELECT * FROM orders WHERE article = :article AND size = :size AND status IN ('new', 'confirm')")
     suspend fun getOrdersByArticleSize(article: String, size: String?): List<OrderEntity>
 
-    @Query("SELECT COUNT(*) FROM orders WHERE status = 'new'")
+    @Query("SELECT COUNT(*) FROM orders WHERE status IN ('new', 'confirm')")
     fun getNewOrdersCount(): Flow<Int>
 
     @Query("SELECT COUNT(*) FROM orders WHERE supplyId = :supplyId")
@@ -77,8 +79,9 @@ interface OrderDao {
     // ==================== СТИКЕРЫ WB (уникальны для заказа, в отличие от
     // баркода товара, который может повторяться в разных кабинетах WB) ====================
 
-    // Заказы "на сборке"/"в доставке", для которых ещё не скачан стикер
-    @Query("SELECT * FROM orders WHERE status IN ('confirm', 'complete') AND stickerBarcode IS NULL")
+    // Заказы "на сборке", для которых ещё не скачан стикер
+    // ВАЖНО: только confirm! new — стикеров нет на стороне WB, complete — уже проданы
+    @Query("SELECT * FROM orders WHERE status = 'confirm' AND stickerBarcode IS NULL")
     suspend fun getOrdersNeedingStickers(): List<OrderEntity>
 
     @Query("UPDATE orders SET stickerBarcode = :barcode, stickerPartA = :partA, stickerPartB = :partB, isSynced = 0 WHERE id = :orderId")
@@ -88,6 +91,18 @@ interface OrderDao {
     // это сканирует ТСД при сборке, а не баркод товара
     @Query("SELECT * FROM orders WHERE stickerBarcode = :barcode LIMIT 1")
     suspend fun getOrderByStickerBarcode(barcode: String): OrderEntity?
+
+    @Query("SELECT * FROM orders WHERE status IN ('new', 'confirm', 'complete')")
+    suspend fun getOrdersForStickerSearch(): List<OrderEntity>
+
+    @Query("SELECT status, COUNT(*) as cnt FROM orders GROUP BY status")
+    suspend fun getOrderStatusCounts(): List<StatusCount>
+
+    @Query("SELECT COUNT(*) FROM orders WHERE stickerBarcode IS NOT NULL AND stickerBarcode != ''")
+    suspend fun getStickerCount(): Int
+
+    @Query("SELECT COUNT(*) FROM orders")
+    suspend fun getTotalOrderCount(): Int
 
     // Полная очистка локальных заказов — нужна при переключении между
     // кабинетами WB, чтобы старые заказы одного кабинета не путались с

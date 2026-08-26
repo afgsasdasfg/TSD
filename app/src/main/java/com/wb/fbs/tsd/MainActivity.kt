@@ -160,6 +160,9 @@ fun TsdApp() {
                     onSyncClick = {
                         viewModel.loadOrders()
                         viewModel.syncOrderStatuses()},
+                    onDownloadStickers = {
+                        viewModel.downloadStickersManual()
+                    },
                     lastSyncTime = uiState.lastSyncTime,  // ← ПЕРЕДАЁМ ВРЕМЯ
                     isLoading = uiState.isLoading
                 )

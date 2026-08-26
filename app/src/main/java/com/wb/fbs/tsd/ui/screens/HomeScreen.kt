@@ -22,8 +22,9 @@ import com.wb.fbs.tsd.ui.theme.*
 fun HomeScreen(
     onNavigate: (String) -> Unit,
     onSyncClick: () -> Unit,
-    lastSyncTime: Long = 0,  // ← ДОБАВИТЬ
-    isLoading: Boolean = false  // ← ДОБАВИТЬ
+    onDownloadStickers: () -> Unit = {},
+    lastSyncTime: Long = 0,
+    isLoading: Boolean = false
 ) {
     Column(
         modifier = Modifier
@@ -79,6 +80,32 @@ fun HomeScreen(
                         )
                     }
                 }
+            }
+        }
+
+        // Кнопка ручного скачивания стикеров
+        OutlinedButton(
+            onClick = onDownloadStickers,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            enabled = !isLoading,
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = WarningOrange
+            ),
+            border = BorderStroke(1.dp, WarningOrange)
+        ) {
+ Row(
+                modifier = Modifier.padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("🏷️", fontSize = 20.sp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "Скачать стикеры WB",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = TextSizeMedium
+                )
             }
         }
 

@@ -28,6 +28,16 @@ class WbRepository(
         contentApiService = service
     }
 
+    suspend fun getDbStats(): String {
+        val total = orderDao.getTotalOrderCount()
+        val withStickers = orderDao.getStickerCount()
+        val statuses = orderDao.getOrderStatusCounts().joinToString(", ") { "${it.status}=${it.cnt}" }
+        // Показываем первые 10 стикер-баркодов для отладки
+        val stickers = orderDao.getOrdersForStickerSearch().filter { !it.stickerBarcode.isNullOrEmpty() }.take(10)
+        val stickerSamples = stickers.joinToString(", ") { "${it.id}=${it.stickerBarcode}" }
+        return "Всего: $total | Со стикерами: $withStickers | Статусы: $statuses | Стикеры: $stickerSamples"
+    }
+
     private fun requireApi(): WbApiService {
         return apiService ?: throw IllegalStateException(
             "WB API не инициализирован. Войдите через настройки."
@@ -77,13 +87,58 @@ class WbRepository(
         }.getOrElse { 0 }
 
         // Пауза перед обновлением статусов
-        delay(700)
+        delay(300)
 
         // Обновляем статусы уже существующих в БД заказов (new → confirm → complete…)
         // syncOrderStatuses() внутри вызывает syncMissingStickers()
         try { syncOrderStatuses() } catch (_: Throwable) {}
 
         return kotlin.Result.success(newCount)
+    }
+
+    /**
+     * Фоновая предзагрузка confirm заказов и их стикеров.
+     * Берём 2 страницы по 1000 заказов через /api/v3/orders,
+     * обновляем статусы, качаем стикеры только для confirm.
+     * Вызывается с задержкой после основного syncNewOrders(),
+     * чтобы приложение не висло при старте.
+     */
+    suspend fun prefetchConfirmStickers() {
+        if (!hasApi) return
+        try {
+            android.util.Log.i("WbRepo", "prefetchConfirmStickers: starting...")
+            val allFreshIds = mutableListOf<Long>()
+            for (page in 0..1) {
+                val nextOffset = (page * 1000).toLong()
+                val resp = safeApiCall { requireApi().getOrders(limit = 1000, next = nextOffset) }.getOrNull()
+                val freshOrders = resp?.orders?.map { it.toEntity() } ?: emptyList()
+                if (freshOrders.isEmpty()) break
+                orderDao.insertOrders(freshOrders)
+                allFreshIds.addAll(freshOrders.map { it.id })
+                val freshIds = freshOrders.map { it.id }
+                syncStatuses(freshIds)
+                delay(200)
+            }
+            // Качаем стикеры для confirm И complete из свежескачанных
+            // (WB API отдаёт стикеры для обоих статусов)
+            val allOrders = orderDao.getOrdersForStickerSearch()
+            val needStickers = allOrders.filter {
+                (it.status == "confirm" || it.status == "complete") && it.stickerBarcode == null && allFreshIds.contains(it.id)
+            }
+            if (needStickers.isNotEmpty()) {
+                android.util.Log.i("WbRepo", "prefetchConfirmStickers: downloading stickers for ${needStickers.size} orders (confirm+complete)")
+                // Качаем батчами по 100
+                val ids = needStickers.map { it.id }
+                for (i in ids.indices step 100) {
+                    val batch = ids.subList(i, minOf(i + 100, ids.size))
+                    downloadStickers(batch)
+                    delay(150)
+                }
+            }
+            android.util.Log.i("WbRepo", "prefetchConfirmStickers: done")
+        } catch (e: Throwable) {
+            android.util.Log.w("WbRepo", "prefetchConfirmStickers failed: ${e.message}")
+        }
     }
 
     suspend fun createSupply(name: String): kotlin.Result<String> = safeApiCall {
@@ -133,7 +188,7 @@ class WbRepository(
     suspend fun downloadStickers(orderIds: List<Long>): kotlin.Result<List<WbStickerDto>> = safeApiCall {
         // Защита: WB отдаёт base64 SVG (~10-50KB/стикер). Если передать
         // 500+ ID — ответ будет 25MB+, что роняет ТСД (OutOfMemoryError).
-        val batch = if (orderIds.size > 100) orderIds.take(100) else orderIds
+        val batch = if (orderIds.size > 200) orderIds.take(200) else orderIds
         requireApi().getStickers(
             type = "svg",
             width = 58,
@@ -142,11 +197,12 @@ class WbRepository(
         )
     }.map { response ->
         val stickers = response.stickers ?: emptyList()
-        // Критично: сохраняем barcode/partA/partB стикера в заказ. Именно stickerBarcode
-        // (закодированное значение из стикера WB) сканируется на сборке — в отличие от
-        // barcode товара, он уникален для конкретного заказа и не путается между разными
-        // кабинетами WB, где один и тот же товар может продаваться с одинаковым штрихкодом.
+        android.util.Log.i("WbRepo", "downloadStickers: requested=${orderIds.size}, got=${stickers.size}")
+        if (stickers.isEmpty()) {
+            android.util.Log.w("WbRepo", "downloadStickers: empty response! requested ids=${orderIds}")
+        }
         stickers.forEach { sticker ->
+            android.util.Log.i("WbRepo", "downloadStickers: orderId=${sticker.orderId}, barcode=${sticker.barcode}, partA=${sticker.partA}")
             orderDao.updateStickerData(
                 orderId = sticker.orderId,
                 barcode = sticker.barcode,
@@ -164,18 +220,26 @@ class WbRepository(
      */
     suspend fun syncMissingStickers(): kotlin.Result<Int> {
         val pending = orderDao.getOrdersNeedingStickers()
+        android.util.Log.i("WbRepo", "syncMissingStickers: pending=${pending.size}, ids=${pending.map { "${it.id}=${it.status}" }}")
         if (pending.isEmpty()) return kotlin.Result.success(0)
         val ids = pending.map { it.id }
         var total = 0
-        // Бьём на батчи по 50 — WB отдаёт base64 SVG для каждого стикера
-        // (~10-50KB на стикер), 500 стикеров одним запросом = OOM на ТСД.
-        val batchSize = 50
+        // Бьём на батчи по 100 — WB отдаёт base64 SVG для каждого стикера
+        // (~10-50KB на стикер). 100 стикеров за раз — ~1-5MB, терпимо для TSD.
+        val batchSize = 100
         for (i in ids.indices step batchSize) {
             val batch = ids.subList(i, minOf(i + batchSize, ids.size))
-            downloadStickers(batch).onSuccess { total += it.size }
+            android.util.Log.i("WbRepo", "syncMissingStickers: batch=${batch}")
+            downloadStickers(batch).onSuccess { stickers ->
+                total += stickers.size
+                android.util.Log.i("WbRepo", "syncMissingStickers: got ${stickers.size} stickers")
+            }.onFailure { e ->
+                android.util.Log.e("WbRepo", "syncMissingStickers: batch failed: ${e.message}")
+            }
             // Пауза между батчами стикеров
-            if (i + batchSize < ids.size) delay(700)
+            if (i + batchSize < ids.size) delay(200)
         }
+        android.util.Log.i("WbRepo", "syncMissingStickers: total=$total")
         return kotlin.Result.success(total)
     }
 
@@ -432,7 +496,9 @@ class WbRepository(
             if (allIds.isEmpty()) return
 
             // WB API не принимает больше ~100 ID за запрос — бьём на батчи.
-            val batchSize = 100
+            // WB API принимает батчи по 1000 — это убирает 217 запросов
+            // и превращает 144с ожидания в ~18с.
+            val batchSize = 1000
             for (i in allIds.indices step batchSize) {
                 val batch = allIds.subList(i, minOf(i + batchSize, allIds.size))
                 val response = requireApi().getOrdersStatus(WbStatusRequest(batch))
@@ -442,8 +508,7 @@ class WbRepository(
                         orderDao.updateOrderStatus(dto.id, dto.supplierStatus)
                     }
                 }
-                // Пауза между батчами статусов — не упираемся в rate limit
-                if (i + batchSize < allIds.size) delay(700)
+                if (i + batchSize < allIds.size) delay(200)
             }
             // Заказы, перешедшие в confirm/complete ("на сборке"), ещё не имеют
             // stickerBarcode — дотягиваем стикеры, иначе сканирование стикера на сборке
@@ -470,15 +535,21 @@ class WbRepository(
      */
     suspend fun scanWbSticker(stickerData: String): ScanResult {
         val trimmed = stickerData.trim()
+        android.util.Log.i("WbRepo", "scanWbSticker: searching for '$trimmed' (len=${trimmed.length}, bytes=${trimmed.map { it.code }.joinToString(",")})")
 
         // 1. Основной путь: точное совпадение по уникальному коду стикера
         val byStickerBarcode = orderDao.getOrderByStickerBarcode(trimmed)
+        android.util.Log.i("WbRepo", "scanWbSticker: getOrderByStickerBarcode result = ${byStickerBarcode?.id ?: "null"}")
         if (byStickerBarcode != null) {
+            android.util.Log.i("WbRepo", "scanWbSticker: found by stickerBarcode! orderId=${byStickerBarcode.id}")
             return finishStickerScan(byStickerBarcode)
         }
 
         // 2. Фолбэк: часть A стикера (partA) — то, что напечатано под штрихкодом
-        val allOrders: List<OrderEntity> = orderDao.getNewOrders().first()
+        val allOrders: List<OrderEntity> = orderDao.getOrdersForStickerSearch()
+        // Дамп первых 5 стикер-баркодов для отладки
+        val sample = allOrders.filter { !it.stickerBarcode.isNullOrEmpty() }.take(5).joinToString(", ") { "${it.id}='${it.stickerBarcode}'(len=${it.stickerBarcode?.length})" }
+        android.util.Log.i("WbRepo", "scanWbSticker: DB has ${allOrders.size} orders, sample stickers: $sample")
         val byPartA = allOrders.find { it.stickerPartA != null && it.stickerPartA == trimmed }
         if (byPartA != null) {
             return finishStickerScan(byPartA)
@@ -498,23 +569,91 @@ class WbRepository(
             }
         }
 
-        // 4. Last resort: стикеры не скачаны — тянем с WB API и повторяем поиск.
+        // 4. Last resort: стикеры не скачаны или заказы не синхронизированы.
+        // Сначала обновляем статусы (заказы могли перейти new→confirm на портале),
+        // затем тянем стикеры для confirm-заказов, и повторяем поиск.
         try {
+            android.util.Log.i("WbRepo", "scanWbSticker: sticker not found, running full sync...")
+            // Получаем все ID заказов из БД для синхронизации статусов
+            val allIds = orderDao.getOrdersForStickerSearch().map { it.id }
+            if (allIds.isNotEmpty()) {
+                android.util.Log.i("WbRepo", "scanWbSticker: syncing ${allIds.size} order statuses...")
+                syncStatuses(allIds)
+                android.util.Log.i("WbRepo", "scanWbSticker: statuses synced, downloading stickers...")
+            }
             syncMissingStickers()
+            // Повторяем поиск по barcode
             val retryByBarcode = orderDao.getOrderByStickerBarcode(trimmed)
             if (retryByBarcode != null) {
+                android.util.Log.i("WbRepo", "scanWbSticker: found after sync! orderId=${retryByBarcode.id}")
                 return finishStickerScan(retryByBarcode)
             }
-            val retryOrders = orderDao.getNewOrders().first()
+            // Повторяем поиск по partA/partB
+            val retryOrders = orderDao.getOrdersForStickerSearch()
             val retryByPartA = retryOrders.find { it.stickerPartA != null && it.stickerPartA == trimmed }
             if (retryByPartA != null) {
+                android.util.Log.i("WbRepo", "scanWbSticker: found by partA after sync! orderId=${retryByPartA.id}")
                 return finishStickerScan(retryByPartA)
             }
             val retryByPartB = retryOrders.find { it.stickerPartB != null && it.stickerPartB == trimmed }
             if (retryByPartB != null) {
+                android.util.Log.i("WbRepo", "scanWbSticker: found by partB after sync! orderId=${retryByPartB.id}")
                 return finishStickerScan(retryByPartB)
             }
-        } catch (_: Throwable) {}
+            android.util.Log.w("WbRepo", "scanWbSticker: sticker '$trimmed' not found even after sync, trying WB API direct search...")
+            // 5. Заказ может быть в confirm на портале, но не в БД.
+            // Перебираем страницы /api/v3/orders, вставляем заказы в БД,
+            // синхронизируем статусы, качаем стикеры для confirm, повторяем поиск.
+            try {
+                var nextOffset: Long = 0
+                var page = 0
+                loop@ while (true) {
+                    page++
+                    android.util.Log.i("WbRepo", "scanWbSticker: step 5 — fetching page $page (next=$nextOffset)")
+                    val resp = safeApiCall { requireApi().getOrders(limit = 1000, next = nextOffset) }.getOrNull()
+                    val freshOrders = resp?.orders?.map { it.toEntity() } ?: emptyList()
+                    if (freshOrders.isEmpty()) {
+                        android.util.Log.i("WbRepo", "scanWbSticker: step 5 — no more orders, stopping")
+                        break@loop
+                    }
+                    // Вставляем в БД
+                    orderDao.insertOrders(freshOrders)
+                    // Синхронизируем статусы
+                    val freshIds = freshOrders.map { it.id }
+                    syncStatuses(freshIds)
+                    // Качаем стикеры только для confirm без стикеров
+                    val confirmPending = orderDao.getOrdersNeedingStickers()
+                    if (confirmPending.isNotEmpty()) {
+                        android.util.Log.i("WbRepo", "scanWbSticker: step 5 — page $page: ${confirmPending.size} confirm orders without stickers")
+                        val ids = confirmPending.map { it.id }
+                        downloadStickers(ids).onSuccess { stickers ->
+                            android.util.Log.i("WbRepo", "scanWbSticker: step 5 — got ${stickers.size} stickers")
+                        }
+                    }
+                    // Повторяем поиск
+                    val found = orderDao.getOrderByStickerBarcode(trimmed)
+                    if (found != null) {
+                        android.util.Log.i("WbRepo", "scanWbSticker: found on page $page! orderId=${found.id}")
+                        return finishStickerScan(found)
+                    }
+                    // Проверяем partA
+                    val allOrders = orderDao.getOrdersForStickerSearch()
+                    val byPartA = allOrders.find { it.stickerPartA != null && it.stickerPartA == trimmed }
+                    if (byPartA != null) {
+                        android.util.Log.i("WbRepo", "scanWbSticker: found by partA on page $page! orderId=${byPartA.id}")
+                        return finishStickerScan(byPartA)
+                    }
+                    // Следующая страница
+                    nextOffset = resp?.next ?: break@loop
+                    // Небольшая пауза между страницами
+                    delay(300)
+                }
+            } catch (e: Throwable) {
+                android.util.Log.e("WbRepo", "scanWbSticker: WB direct search failed: ${e.message}", e)
+            }
+        } catch (e: Throwable) {
+            android.util.Log.e("WbRepo", "scanWbSticker: sync failed: ${e.message}", e)
+        }
 
         scanLogDao.insert(
             ScanLogEntity(
